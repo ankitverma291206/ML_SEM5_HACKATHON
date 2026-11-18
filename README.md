@@ -89,6 +89,8 @@ docker compose run --build --rm pathsnap-api python -m src.models.train_xgboost
 
 The Compose service mounts the dataset read-only and mounts `experiments/` and `artifacts/` so training inputs and outputs stay in the repository. Start Docker Desktop first. When training finishes, the model and reports will be available on the host in those folders.
 
+Some managed networks use a private certificate authority for internet traffic. If the container build reports a PyPI certificate verification error, configure that trusted CA for Docker's Linux build environment before retrying. Do not disable HTTPS certificate verification.
+
 ## Project goal
 
 Build an end-to-end system that takes noisy GPS observations, identifies likely road segments, and reconstructs a coherent vehicle route using road-network information and an HMM/Viterbi decoder. The final application uses a two-laptop setup: a FastAPI backend on Laptop 1 and an evaluator-facing UI on Laptop 2.
