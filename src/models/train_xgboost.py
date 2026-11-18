@@ -56,6 +56,9 @@ MODEL_FEATURE_COLUMNS = [
     "gps_speed_mps",
     "time_delta_s",
     "large_or_invalid_time_gap",
+    "distance_sq", "distance_log1p", "inverse_distance",
+    "heading_diff_sin", "heading_diff_cos", "speed_sq", "speed_log1p",
+    "time_delta_log1p", "projection_edge_distance", "distance_heading_interaction",
 ]
 
 LABEL_COLUMN = "is_matching_candidate"
@@ -105,8 +108,14 @@ def load_processed_training_data() -> tuple[
         alignments_by_trip: Full reference alignment table for every trip.
         road_arcs_by_trip: Directed ``(from_node, to_node)`` rows indexed by arc ID.
     """
+    audit_path = EXPERIMENTS_DIR / "candidate_coverage_audit.csv"
+    allowed_trip_ids = None
+    if audit_path.is_file():
+        audited = pd.read_csv(audit_path, dtype={GROUP_COLUMN: str})
+        allowed_trip_ids = set(audited[GROUP_COLUMN].astype(str))
     candidate_files = sorted(
-        EXPERIMENTS_DIR.glob("labelled_candidates_*.csv")
+        path for path in EXPERIMENTS_DIR.glob("labelled_candidates_*.csv")
+        if allowed_trip_ids is None or path.stem.removeprefix("labelled_candidates_") in allowed_trip_ids
     )
     if not candidate_files:
         raise FileNotFoundError(
@@ -246,6 +255,23 @@ def make_model_features(candidates: pd.DataFrame) -> pd.DataFrame:
 
     # The two raw angle columns have been replaced by their circular encoding.
     features = features.drop(columns=["road_bearing", "gps_heading"])
+
+    # Ten bounded or interaction features extend the emission model to 20 inputs.
+    distance = candidates["distance_m"].clip(lower=0)
+    heading = np.deg2rad(candidates["heading_difference"].fillna(90.0))
+    speed = candidates["gps_speed_mps"].clip(lower=0)
+    dt = candidates["time_delta_s"].clip(lower=0)
+    position = candidates["projection_position"].fillna(0.5)
+    features["distance_sq"] = distance ** 2
+    features["distance_log1p"] = np.log1p(distance)
+    features["inverse_distance"] = 1.0 / (1.0 + distance)
+    features["heading_diff_sin"] = np.sin(heading)
+    features["heading_diff_cos"] = np.cos(heading)
+    features["speed_sq"] = speed ** 2
+    features["speed_log1p"] = np.log1p(speed)
+    features["time_delta_log1p"] = np.log1p(dt)
+    features["projection_edge_distance"] = np.minimum(position, 1.0 - position)
+    features["distance_heading_interaction"] = distance * (1.0 - np.cos(heading))
 
     # XGBoost can use NaN values to learn how missing feature values behave.
     # Replace infinities with NaN as well, so bad values do not break training.

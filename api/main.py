@@ -67,7 +67,7 @@ def model_results() -> dict:
         with cv_path.open("r", newline="", encoding="utf-8") as stream:
             cv = {r["metric"]: r["mean"] for r in csv.DictReader(stream)}
         rows.append({
-            "model_name": "XGBoost", "partition": "Group CV (6 trips)",
+            "model_name": "XGBoost", "partition": "Group CV",
             "test_accuracy": cv.get("candidate_accuracy"), "test_macro_f1": cv.get("candidate_macro_f1"),
             "test_top1_accuracy": cv.get("end_to_end_top1_accuracy"),
             "test_log_loss": cv.get("candidate_log_loss"),
@@ -94,6 +94,28 @@ def model_results() -> dict:
             "note": "Run the Logistic Regression training command to generate CV metrics",
         })
     return {"models": rows}
+
+
+@app.get("/hmm-status", tags=["evaluation"])
+def hmm_status() -> dict:
+    """Expose the fitted transition model summary to the evaluator UI."""
+    path = Path(__file__).resolve().parents[1] / "artifacts" / "hmm_transition_model.json"
+    if not path.is_file():
+        return {"trained": False}
+    import json
+    model = json.loads(path.read_text(encoding="utf-8"))
+    transition_probabilities = model.pop("transition_probabilities", {})
+    metrics_path = Path(__file__).resolve().parents[1] / "experiments" / "atharv_route_metrics.csv"
+    route_metrics = {}
+    if metrics_path.is_file():
+        with metrics_path.open("r", newline="", encoding="utf-8") as stream:
+            rows = [r for r in csv.DictReader(stream) if r.get("model_name") == "Random Forest"]
+        if rows:
+            for key in ("route_continuity_cls_only_pct", "route_continuity_hmm_pct", "route_similarity_pct", "arc_f1_pct", "mean_gps_dist_m"):
+                vals = [float(r[key]) for r in rows if r.get(key)]
+                if vals:
+                    route_metrics[key] = sum(vals) / len(vals)
+    return {"trained": True, **model, "transition_probabilities": transition_probabilities, "evaluation_partition": "student_test (10 trips)", "route_metrics": route_metrics}
 
 
 @app.get("/health", tags=["system"])
