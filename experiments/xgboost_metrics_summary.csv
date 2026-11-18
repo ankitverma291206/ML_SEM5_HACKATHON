@@ -1,0 +1,13 @@
+metric,definition,priority,mean,standard_deviation
+Candidate Accuracy,Thresholded candidate classification accuracy at probability 0.5,Essential,0.8991349792500122,0.030567730228260856
+Macro F1-score,Balanced candidate classification across both classes,Essential,0.7475251408125885,0.10870906803913719
+Top-1 Accuracy,Correct highest-scoring arc divided by all aligned GPS observations,Essential,0.572153522754513,0.2688053495644464
+Log Loss,Quality of candidate match probabilities,Essential,0.2421794444322586,0.07678495482386682
+Route Continuity,Connected consecutive predicted arcs when both observations have predictions,Essential,0.86748430864951,0.013896561929968326
+Candidate Miss Rate,Aligned observations where candidate generation omitted the correct arc,Essential,0.16278516975756896,0.28903245121648
+Inference Time (ms/trip),Model scoring plus top-candidate selection; excludes preprocessing,Essential,30.32553999510128,14.85562467929586
+Precision,Positive-class precision at the 0.5 candidate threshold,Useful,0.5780707437172703,0.20262950540031868
+Recall,Positive-class recall at the 0.5 candidate threshold,Useful,0.5444499974765875,0.2234417578232717
+Route-level Accuracy (arc Jaccard),Per-trip overlap of unique predicted and reference arcs; ignores order,Useful,0.563378649968131,0.13188321249777268
+GPS-to-road Distance (mean metres),Mean selected-arc distance for observations with a prediction,Useful,6.705540125837783,2.080620379065007
+GPS-to-road Distance (95th percentile metres),95th percentile selected-arc distance for observations with a prediction,Useful,21.32428538469231,11.750770467088003

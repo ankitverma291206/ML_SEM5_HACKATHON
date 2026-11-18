@@ -68,18 +68,31 @@ def model_results() -> dict:
             cv = {r["metric"]: r["mean"] for r in csv.DictReader(stream)}
         rows.append({
             "model_name": "XGBoost", "partition": "Group CV (6 trips)",
-            "test_accuracy": None, "test_macro_f1": cv.get("candidate_macro_f1"),
+            "test_accuracy": cv.get("candidate_accuracy"), "test_macro_f1": cv.get("candidate_macro_f1"),
             "test_top1_accuracy": cv.get("end_to_end_top1_accuracy"),
             "test_log_loss": cv.get("candidate_log_loss"),
             "note": "Preliminary CV; no student-test result recorded",
         })
 
-    rows.append({
-        "model_name": "Logistic Regression", "partition": "Not evaluated",
-        "test_accuracy": None, "test_macro_f1": None,
-        "test_top1_accuracy": None, "test_log_loss": None,
-        "note": "Training script exists; no saved metrics found",
-    })
+    logistic_path = Path(__file__).resolve().parents[1] / "experiments" / "logistic_regression_metrics.csv"
+    if logistic_path.is_file():
+        with logistic_path.open("r", newline="", encoding="utf-8") as stream:
+            logistic = next(csv.DictReader(stream), {})
+        rows.append({
+            "model_name": "Logistic Regression", "partition": "Group CV (labeled trips)",
+            "test_accuracy": logistic.get("overall_accuracy"),
+            "test_macro_f1": logistic.get("macro_f1_score"),
+            "test_top1_accuracy": logistic.get("top_1_accuracy"),
+            "test_log_loss": logistic.get("log_loss"),
+            "note": "Training-script CV metrics; not student-test results",
+        })
+    else:
+        rows.append({
+            "model_name": "Logistic Regression", "partition": "Not evaluated",
+            "test_accuracy": None, "test_macro_f1": None,
+            "test_top1_accuracy": None, "test_log_loss": None,
+            "note": "Run the Logistic Regression training command to generate CV metrics",
+        })
     return {"models": rows}
 
 

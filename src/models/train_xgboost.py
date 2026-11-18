@@ -18,7 +18,7 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import f1_score, log_loss, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, log_loss, precision_score, recall_score
 from sklearn.model_selection import GroupKFold
 from xgboost import XGBClassifier
 
@@ -270,6 +270,7 @@ def score_fold(
     candidate_macro_f1 = f1_score(
         labels, predicted_labels, average="macro", zero_division=0
     )
+    candidate_accuracy = accuracy_score(labels, predicted_labels)
     candidate_precision = precision_score(
         labels, predicted_labels, zero_division=0
     )
@@ -399,6 +400,7 @@ def score_fold(
             else 0.0
         ),
         "candidate_macro_f1": float(candidate_macro_f1),
+        "candidate_accuracy": float(candidate_accuracy),
         "candidate_precision": float(candidate_precision),
         "candidate_recall": float(candidate_recall),
         "candidate_log_loss": float(candidate_log_loss),
@@ -644,6 +646,12 @@ def main() -> None:
     # Make the metrics from the assignment easy to read without opening a
     # wide raw CSV. Each mean and standard deviation is across the CV folds.
     display_metrics = [
+        (
+            "Candidate Accuracy",
+            "candidate_accuracy",
+            "Thresholded candidate classification accuracy at probability 0.5",
+            "Essential",
+        ),
         (
             "Macro F1-score",
             "candidate_macro_f1",
