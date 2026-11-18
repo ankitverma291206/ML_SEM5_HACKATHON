@@ -21,6 +21,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, log_loss, precision_score, recall_score
 from sklearn.model_selection import GroupKFold
 from xgboost import XGBClassifier
+from src.models.viterbi import ViterbiRouteDecoder, compute_route_continuity
 
 
 # Find the repository root from this file, so the script works no matter
@@ -96,6 +97,7 @@ MODEL_PARAMETERS = {
 }
 
 
+# Simple explanation: Load labeled candidates and observation counts from matching alignments.
 def load_processed_training_data() -> tuple[
     pd.DataFrame,
     dict[str, pd.DataFrame],
@@ -242,6 +244,7 @@ def load_processed_training_data() -> tuple[
     return all_candidates, alignments_by_trip, road_arcs_by_trip
 
 
+# Simple explanation: Turn candidate measurements into the 20 numbers used by XGBoost.
 def make_model_features(candidates: pd.DataFrame) -> pd.DataFrame:
     """Create safe numeric model inputs from the processed candidate columns."""
     features = candidates[BASE_FEATURE_COLUMNS].copy()
@@ -281,6 +284,30 @@ def make_model_features(candidates: pd.DataFrame) -> pd.DataFrame:
     return features[MODEL_FEATURE_COLUMNS]
 
 
+# Simple explanation: Learn how often road routes stay on an arc or move to a connected arc.
+def fit_transition_probabilities(rows: pd.DataFrame, road_arcs_by_trip: dict[str, np.ndarray]) -> dict[str, float]:
+    """Fit topology transition classes using positive routes in fold-training trips only."""
+    counts = {name: 0 for name in ("same_arc", "direct", "reverse_or_junction", "disconnected")}
+    total = 0
+    for trip_id, group in rows.groupby(GROUP_COLUMN):
+        trip_id = str(trip_id)
+        arcs = road_arcs_by_trip[trip_id]
+        seq = group[group[LABEL_COLUMN] == 1].sort_values("observation_id").drop_duplicates("observation_id")["arc_id"].astype(int).to_list()
+        for a, b in zip(seq, seq[1:]):
+            if a == b:
+                kind = "same_arc"
+            elif arcs[a, 1] == arcs[b, 0]:
+                kind = "direct"
+            elif arcs[a, 1] == arcs[b, 1] or arcs[a, 0] == arcs[b, 0]:
+                kind = "reverse_or_junction"
+            else:
+                kind = "disconnected"
+            counts[kind] += 1
+            total += 1
+    return {name: (count + 1) / (total + len(counts)) for name, count in counts.items()}
+
+
+# Simple explanation: Calculate the requested metrics for all held-out trips in one fold.
 def score_fold(
     validation_rows: pd.DataFrame,
     probabilities: np.ndarray,
@@ -453,11 +480,13 @@ def score_fold(
     }
 
 
+# Simple explanation: Create one clear baseline XGBoost classifier configuration.
 def build_model() -> XGBClassifier:
     """Create one clear baseline XGBoost classifier configuration."""
     return XGBClassifier(**MODEL_PARAMETERS)
 
 
+# Simple explanation: Check the model on held-out trips and measure its route predictions.
 def run_grouped_cross_validation(
     candidates: pd.DataFrame,
     alignments_by_trip: dict[str, pd.DataFrame],
@@ -522,6 +551,39 @@ def run_grouped_cross_validation(
             alignments_by_trip,
             road_arcs_by_trip,
         )
+
+        # Fit HMM transition probabilities on this fold's training trips only.
+        fold_transitions = fit_transition_probabilities(
+            candidates.iloc[train_indices], road_arcs_by_trip
+        )
+        decoder = ViterbiRouteDecoder(learned_transition_probs=fold_transitions)
+        hmm_valid, hmm_total, hmm_correct = 0, 0, 0
+        hmm_trip_continuities = []
+        classifier_trip_continuities = []
+        for trip_id, trip_rows in validation_rows.groupby(GROUP_COLUMN):
+            trip_id = str(trip_id)
+            trip_rows = trip_rows.copy()
+            # Preserve fold probabilities by looking them up by row index (indices originate in the full table).
+            probability_map = dict(zip(validation_rows.index.to_numpy(), probabilities))
+            trip_rows["prob_matching"] = [probability_map[i] for i in trip_rows.index]
+            arcs_df = pd.DataFrame(road_arcs_by_trip[trip_id], columns=["from_node_id", "to_node_id"])
+            n_obs = len(alignments_by_trip[trip_id])
+            decoded = decoder.decode_trip(trip_rows, n_obs, arcs_df)
+            _, _, continuity = compute_route_continuity(decoded, arcs_df)
+            hmm_trip_continuities.append(continuity)
+            ref = alignments_by_trip[trip_id].sort_values("observation_id")["aligned_arc_id"].astype(int).to_numpy()
+            for predicted, actual in zip(decoded, ref):
+                hmm_total += 1
+                hmm_correct += int(predicted == actual)
+            cls_selected = selected_candidates[selected_candidates[GROUP_COLUMN] == trip_id]
+            cls_seq = [-1] * n_obs
+            for _, selected in cls_selected.iterrows():
+                cls_seq[int(selected.observation_id)] = int(selected.arc_id)
+            _, _, cls_continuity = compute_route_continuity(cls_seq, arcs_df)
+            classifier_trip_continuities.append(cls_continuity)
+        metrics["hmm_route_continuity"] = float(np.mean(hmm_trip_continuities)) if hmm_trip_continuities else 0.0
+        metrics["classifier_route_continuity"] = float(np.mean(classifier_trip_continuities)) if classifier_trip_continuities else 0.0
+        metrics["hmm_observation_accuracy"] = hmm_correct / hmm_total if hmm_total else 0.0
         validation_trip_count = len(validation_trip_ids)
         metrics["inference_time_ms_per_trip"] = (
             inference_time_ms / validation_trip_count
@@ -542,6 +604,7 @@ def run_grouped_cross_validation(
     return pd.DataFrame(fold_results)
 
 
+# Simple explanation: Train the final XGBoost model and save the model and settings.
 def save_final_model(
     candidates: pd.DataFrame,
     cv_results: pd.DataFrame,
@@ -595,6 +658,7 @@ def save_final_model(
     )
 
 
+# Simple explanation: Run this model workflow and save its results.
 def main() -> None:
     """Run data checks, grouped validation, and final model training."""
     print("Loading labeled candidate files...")

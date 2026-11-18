@@ -20,17 +20,21 @@ from sklearn.metrics import (
 )
 
 
+# Simple explanation: Accurate elapsed wall-clock timer for measuring training and inference times.
 class Timer:
     """Accurate elapsed wall-clock timer for measuring training and inference times."""
 
+    # Simple explanation: Set the starting values for this object.
     def __init__(self) -> None:
         self.elapsed: float = 0.0
         self._start_time: Optional[float] = None
 
+    # Simple explanation: Handle start.
     def start(self) -> "Timer":
         self._start_time = time.perf_counter()
         return self
 
+    # Simple explanation: Handle stop.
     def stop(self) -> float:
         if self._start_time is None:
             raise RuntimeError("Timer was never started.")
@@ -38,14 +42,17 @@ class Timer:
         self._start_time = None
         return self.elapsed
 
+    # Simple explanation: Start the timer when this block begins.
     def __enter__(self) -> "Timer":
         self.start()
         return self
 
+    # Simple explanation: Stop the timer when this block ends.
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.stop()
 
 
+# Simple explanation: Compute candidate-level binary classification metrics.
 def compute_candidate_metrics(
     y_true: Union[np.ndarray, List[int], pd.Series],
     y_pred: Union[np.ndarray, List[int], pd.Series],
@@ -90,6 +97,7 @@ def compute_candidate_metrics(
     return metrics
 
 
+# Simple explanation: Compute Observation-level Top-1 Accuracy.
 def compute_observation_top1_accuracy(
     df: pd.DataFrame,
     prob_col: str = "prob_matching",
@@ -126,6 +134,7 @@ def compute_observation_top1_accuracy(
     return float(correct_count / total_obs) if total_obs > 0 else 0.0
 
 
+# Simple explanation: Compute Candidate Miss Rate from the candidate generation stage.
 def compute_candidate_miss_rate(
     df: pd.DataFrame,
     label_col: str = "is_matching_candidate",
@@ -181,6 +190,7 @@ def compute_candidate_miss_rate(
     return float(missed_count / total_observations) if total_observations > 0 else 0.0
 
 
+# Simple explanation: Comprehensive evaluation combining candidate-level and observation-level metrics.
 def evaluate_model_predictions(
     df_eval: pd.DataFrame,
     pred_col: str = "pred_matching",

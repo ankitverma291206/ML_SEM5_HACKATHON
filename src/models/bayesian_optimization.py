@@ -33,6 +33,7 @@ VALID_OPTIMIZATION_METRICS = {
 }
 
 
+# Simple explanation: Define a scientifically principled hyperparameter search space for Optuna.
 def sample_search_space(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
     """Define a scientifically principled hyperparameter search space for Optuna."""
     name = model_name.lower().replace(" ", "_").replace("-", "_")
@@ -65,6 +66,7 @@ def sample_search_space(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
         raise ValueError(f"No search space defined for model: '{model_name}'.")
 
 
+# Simple explanation: Return pipeline builder for Atharv's models.
 def get_pipeline_factory_for_model(model_name: str) -> Callable[..., Pipeline]:
     """Return pipeline builder for Atharv's models."""
     name = model_name.lower().replace(" ", "_").replace("-", "_")
@@ -78,9 +80,11 @@ def get_pipeline_factory_for_model(model_name: str) -> Callable[..., Pipeline]:
         raise ValueError(f"Unknown model name: '{model_name}'")
 
 
+# Simple explanation: Manages Optuna TPE Bayesian hyperparameter optimization.
 class BayesianOptimizer:
     """Manages Optuna TPE Bayesian hyperparameter optimization."""
 
+    # Simple explanation: Set the starting values for this object.
     def __init__(
         self,
         df_train: pd.DataFrame,
@@ -117,10 +121,12 @@ class BayesianOptimizer:
         # Optimization remains locked until the initial 5-model comparison is finalized
         self._is_enabled: bool = False
 
+    # Simple explanation: Unlock Bayesian optimization after 5-model comparison is completed.
     def enable_optimization(self) -> None:
         """Unlock Bayesian optimization after 5-model comparison is completed."""
         self._is_enabled = True
 
+    # Simple explanation: Optuna objective function using leak-free GroupKFold cross-validation on training trips.
     def _objective(self, trial: optuna.Trial) -> float:
         """Optuna objective function using leak-free GroupKFold cross-validation on training trips.
 
@@ -191,6 +197,7 @@ class BayesianOptimizer:
         target_score = oof_eval.get(self.metric_to_optimize)
         return float(target_score) if target_score is not None else float(np.mean(fold_scores))
 
+    # Simple explanation: Run Optuna TPE Bayesian optimization.
     def run_optimization(
         self,
         n_trials: int = 30,
@@ -255,6 +262,7 @@ class BayesianOptimizer:
             "optimization_time_sec": self.optimization_time,
         }
 
+    # Simple explanation: Export trial history to CSV.
     def export_trials_csv(self) -> Path:
         """Export trial history to CSV."""
         if self.trials_df is None or self.trials_df.empty:

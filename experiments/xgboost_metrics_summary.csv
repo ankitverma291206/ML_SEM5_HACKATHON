@@ -5,7 +5,7 @@ Top-1 Accuracy,Correct highest-scoring arc divided by all aligned GPS observatio
 Log Loss,Quality of candidate match probabilities,Essential,0.22212911546230316,0.02484141206789442
 Route Continuity,Connected consecutive predicted arcs when both observations have predictions,Essential,0.8771666687706574,0.06158694632053217
 Candidate Miss Rate,Aligned observations where candidate generation omitted the correct arc,Essential,0.07594574990323025,0.12360928517934545
-Inference Time (ms/trip),Model scoring plus top-candidate selection; excludes preprocessing,Essential,13.473499999935962,1.9669906153707397
+Inference Time (ms/trip),Model scoring plus top-candidate selection; excludes preprocessing,Essential,13.498517239682508,2.3824014535008344
 Precision,Positive-class precision at the 0.5 candidate threshold,Useful,0.7375566040334236,0.10470948395766677
 Recall,Positive-class recall at the 0.5 candidate threshold,Useful,0.680967299519402,0.03975922904208002
 Route-level Accuracy (arc Jaccard),Per-trip overlap of unique predicted and reference arcs; ignores order,Useful,0.6893022629991045,0.07699155818751223

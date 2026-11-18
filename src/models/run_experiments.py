@@ -41,6 +41,7 @@ from src.models.scoring import save_model_artifacts
 from src.models.validation import ModelCVResult
 
 
+# Simple explanation: Draw charts that compare the measured model results.
 def plot_three_model_comparison(
     df_comparison: pd.DataFrame,
     output_dir: Path = Path("experiments"),
@@ -101,6 +102,7 @@ def plot_three_model_comparison(
     return plots
 
 
+# Simple explanation: Run the model comparisons and save their results.
 def execute_experiments():
     """Main orchestration for real ML model experimentation."""
     print("=" * 70)

@@ -50,6 +50,7 @@ RANDOM_STATE = 42
 # 2. CREATE LOGISTIC REGRESSION PIPELINE
 # ============================================================
 
+# Simple explanation: Build the Logistic Regression steps for filling gaps, scaling, and learning.
 def create_model():
 
     return Pipeline([

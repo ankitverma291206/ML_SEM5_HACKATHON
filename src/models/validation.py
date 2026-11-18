@@ -17,6 +17,7 @@ from src.models.config import FeatureConfig
 from src.models.evaluate import Timer, evaluate_model_predictions
 
 
+# Simple explanation: Find the exact column index for the target positive class in predict_proba.
 def get_positive_class_index(pipeline: Pipeline, pos_label: int = 1) -> int:
     """Find the exact column index for the target positive class in predict_proba.
 
@@ -42,6 +43,7 @@ def get_positive_class_index(pipeline: Pipeline, pos_label: int = 1) -> int:
 
 
 @dataclass
+# Simple explanation: Container for Cross-Validation experimentation outputs.
 class ModelCVResult:
     """Container for Cross-Validation experimentation outputs."""
 
@@ -57,6 +59,7 @@ class ModelCVResult:
     total_infer_time: float
 
 
+# Simple explanation: Train and check a model while keeping each trip in only one data split.
 def run_trip_group_cv(
     df_train: pd.DataFrame,
     pipeline_factory: Any,

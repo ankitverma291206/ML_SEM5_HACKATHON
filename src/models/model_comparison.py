@@ -18,6 +18,7 @@ from src.models.validation import ModelCVResult
 
 
 @dataclass
+# Simple explanation: Metadata for validating experiment comparability across team models.
 class ModelExperimentMetadata:
     """Metadata for validating experiment comparability across team models."""
 
@@ -36,6 +37,7 @@ class ModelExperimentMetadata:
     route_continuity: Optional[float] = None
 
 
+# Simple explanation: Validate that an external model experiment used equivalent methodology.
 def validate_experiment_comparability(
     meta: ModelExperimentMetadata,
     expected_partition: str = "train_80_trips",
@@ -70,9 +72,11 @@ def validate_experiment_comparability(
     return is_comparable, discrepancies
 
 
+# Simple explanation: Manages cross-model comparisons for Atharv's models and teammate models.
 class ModelComparisonManager:
     """Manages cross-model comparisons for Atharv's models and teammate models."""
 
+    # Simple explanation: Set the starting values for this object.
     def __init__(self, output_dir: Union[str, Path] = "experiments") -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +88,7 @@ class ModelComparisonManager:
         # Optional student test metrics
         self.student_test_metrics: Dict[str, Dict[str, Any]] = {}
 
+    # Simple explanation: Register one of Atharv's three trained model results.
     def add_atharv_result(
         self,
         cv_result: ModelCVResult,
@@ -94,6 +99,7 @@ class ModelComparisonManager:
         if student_test_eval:
             self.student_test_metrics[cv_result.model_name] = student_test_eval
 
+    # Simple explanation: Import actual experimental results supplied by a teammate.
     def import_external_result(
         self,
         model_name: str,
@@ -145,6 +151,7 @@ class ModelComparisonManager:
 
         return is_comparable
 
+    # Simple explanation: Generate consolidated summary of Atharv's three models.
     def generate_atharv_summary(self) -> pd.DataFrame:
         """Generate consolidated summary of Atharv's three models."""
         rows = []
@@ -174,6 +181,7 @@ class ModelComparisonManager:
             df = df.sort_values(by=["top1_accuracy", "cv_macro_f1"], ascending=[False, False])
         return df
 
+    # Simple explanation: Export Atharv's consolidated cross-validation results to CSV.
     def export_atharv_cv_results(self) -> Path:
         """Export Atharv's consolidated cross-validation results to CSV."""
         df = self.generate_atharv_summary()
@@ -181,6 +189,7 @@ class ModelComparisonManager:
         df.to_csv(path, index=False)
         return path
 
+    # Simple explanation: Consolidate Atharv's 3 models and teammate models into one table.
     def generate_five_model_comparison(self) -> pd.DataFrame:
         """Consolidate Atharv's 3 models and teammate models into one table.
 
@@ -255,6 +264,7 @@ class ModelComparisonManager:
             ).reset_index(drop=True)
         return df
 
+    # Simple explanation: Export unified five-model comparison table to CSV.
     def export_five_model_comparison_csv(self) -> Path:
         """Export unified five-model comparison table to CSV."""
         df = self.generate_five_model_comparison()
@@ -262,6 +272,7 @@ class ModelComparisonManager:
         df.to_csv(path, index=False)
         return path
 
+    # Simple explanation: Generate and save bar chart comparison of a metric across models.
     def plot_comparison(
         self,
         metric: str = "cv_macro_f1",

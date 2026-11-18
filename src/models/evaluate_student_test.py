@@ -27,6 +27,7 @@ from src.models.evaluate import (
 )
 
 
+# Simple explanation: Prepare the student-test trips for model evaluation.
 def process_student_test_trips() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Process all 10 student test trips into candidates and inventory."""
     test_dir = Path("Student folder/student_test")
@@ -63,6 +64,7 @@ def process_student_test_trips() -> Tuple[pd.DataFrame, pd.DataFrame]:
     return df_test_cands, df_test_inv
 
 
+# Simple explanation: Measure model results on the student-test trips.
 def evaluate_on_student_test():
     test_cands_path = Path("data/processed/test_candidates.parquet")
     test_inv_path = Path("data/processed/test_observation_inventory.parquet")

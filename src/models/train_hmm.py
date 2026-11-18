@@ -17,6 +17,7 @@ CSV_DATA = ROOT / "data" / "processed" / "train_candidates.csv.gz"
 OUT = ROOT / "artifacts" / "hmm_transition_model.json"
 
 
+# Simple explanation: Run this model workflow and save its results.
 def main() -> None:
     if not PARQUET_DATA.is_file() and not CSV_DATA.is_file():
         raise FileNotFoundError("Run python -m src.features.build_training_dataset first")
