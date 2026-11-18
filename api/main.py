@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import csv
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -33,6 +36,23 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.get("/", include_in_schema=False)
+def evaluator_ui():
+    """Serve the evaluator interface from the same host as the API."""
+    return FileResponse(Path(__file__).resolve().parents[1] / "ui" / "index.html")
+
+
+@app.get("/model-results", tags=["evaluation"])
+def model_results() -> dict:
+    """Return the checked-in student-test comparison, if it is available."""
+    path = Path(__file__).resolve().parents[1] / "experiments" / "atharv_student_test_results.csv"
+    if not path.is_file():
+        return {"models": []}
+    with path.open("r", newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    return {"models": rows, "source": "experiments/atharv_student_test_results.csv"}
 
 
 @app.get("/health", tags=["system"])

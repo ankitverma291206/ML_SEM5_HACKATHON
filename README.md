@@ -6,9 +6,9 @@
 
 This README is the team's working plan: it assigns ownership, defines component handoffs, and tracks the work toward the hackathon submission. The supplied hackathon PDFs define the mandatory requirements. Architecture choices and example models below are the team's proposed approach and should be validated against real experiments.
 
-## FastAPI and Docker quick start
+## Evaluator UI, FastAPI, and Docker quick start
 
-The repository includes an initial FastAPI service and Docker Compose setup. It can report health, list trips in the configured partition, and return paginated GPS observations. **The model and HMM have not been implemented yet**, so `POST /predict` currently returns HTTP 503 with a clear message instead of inventing a route. Replace the integration point in `api/pipeline.py` when the real inference pipeline is ready.
+The repository includes a FastAPI service, Docker Compose setup, and browser evaluator at `/`. It can report health, list trips, return paginated GPS observations, and show checked-in student-test metrics. **Model and HMM inference are not integrated**, so `POST /predict` currently returns HTTP 503 with a clear message rather than inventing a route. Connect the real inference pipeline in `api/pipeline.py` when ready.
 
 ### Run with Docker Compose
 
@@ -18,7 +18,7 @@ From the repository root, with Docker Desktop/Docker Engine and the Compose plug
 docker compose up --build
 ```
 
-The API listens on port 8000. Open `http://localhost:8000/docs` for the interactive API page. The default trip directory is the supplied `Student folder/student_test` partition, mounted read-only into the container. The repository's optional `data/` directory is also mounted read-only for later evaluator data.
+The API and UI listen on port 8000. Open `http://localhost:8000/` for the evaluator UI or `http://localhost:8000/docs` for the interactive API page. The default trip directory is the supplied `Student folder/student_test` partition, mounted read-only into the container. The repository's optional `data/` directory is also mounted read-only for later evaluator data.
 
 To point the service at another partition, set these values in a local `.env` file (do not commit it):
 
@@ -38,6 +38,8 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+Open `http://localhost:8000/` for the evaluator UI. On the UI laptop, set its API field to `http://<API-laptop-LAN-IP>:8000`; allow inbound TCP port 8000 and add the UI browser origin to `PATHSNAP_CORS_ORIGINS` on the API laptop.
 
 Useful endpoints:
 
