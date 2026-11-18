@@ -13,16 +13,16 @@ import numpy as np
 import pandas as pd
 
 
-# Default baseline proposed feature columns (subject to update when Aum finalizes feature_schema.md)
+# Final verified feature columns matching Aum's candidate feature schema
 DEFAULT_FEATURE_COLUMNS: List[str] = [
     "distance_m",
     "projection_position",
     "road_bearing",
     "gps_heading",
     "heading_difference",
-    "gps_speed",
-    "time_delta",
-    "segment_length",
+    "gps_speed_mps",
+    "time_delta_s",
+    "large_or_invalid_time_gap",
 ]
 
 DEFAULT_IDENTIFIER_COLUMNS: List[str] = [
@@ -32,6 +32,13 @@ DEFAULT_IDENTIFIER_COLUMNS: List[str] = [
 ]
 
 DEFAULT_LABEL_COLUMN: str = "is_matching_candidate"
+
+# Reference columns that must NEVER be used as predictive features
+FORBIDDEN_REFERENCE_COLUMNS: Set[str] = {
+    "aligned_arc_id",
+    "aligned_route_position",
+    "alignment_distance_m",
+}
 
 
 def encode_circular_angles(
@@ -60,8 +67,8 @@ def encode_circular_angles(
 class FeatureConfig:
     """Manages feature definitions and dataset validation for candidate models.
 
-    Strictly forbids identifier columns or the target label from appearing
-    inside predictive feature columns to prevent data leakage.
+    Strictly forbids identifier columns, reference route columns, or the target label
+    from appearing inside predictive feature columns to prevent data leakage.
     """
 
     feature_columns: List[str] = field(default_factory=lambda: list(DEFAULT_FEATURE_COLUMNS))
@@ -85,6 +92,14 @@ class FeatureConfig:
         if self.label_column in self.feature_columns:
             raise ValueError(
                 f"Target leakage hazard: Target label column '{self.label_column}' "
+                f"cannot appear inside predictive 'feature_columns'."
+            )
+
+        # 3. Reject reference route alignment columns inside predictive feature list
+        ref_overlap = set(self.feature_columns).intersection(FORBIDDEN_REFERENCE_COLUMNS)
+        if ref_overlap:
+            raise ValueError(
+                f"Reference alignment leakage hazard: Reference column(s) {sorted(ref_overlap)} "
                 f"cannot appear inside predictive 'feature_columns'."
             )
 
@@ -130,7 +145,6 @@ class FeatureConfig:
         if missing_ids:
             raise ValueError(f"DataFrame is missing identifier columns: {missing_ids}")
 
-        # Identifiers must not contain null/missing values
         for col in self.identifier_columns:
             if df[col].isna().any():
                 raise ValueError(
@@ -144,12 +158,17 @@ class FeatureConfig:
                 f"DataFrame is missing configured feature columns: {missing_features}"
             )
 
-        # 3. Check numerical feature types
+        # 3. Check numerical feature types (allow numeric dtypes and boolean dtypes)
         for col in self.feature_columns:
-            if not pd.api.types.is_numeric_dtype(df[col]):
+            dtype = df[col].dtype
+            is_valid_type = (
+                pd.api.types.is_numeric_dtype(dtype)
+                or pd.api.types.is_bool_dtype(dtype)
+            )
+            if not is_valid_type:
                 raise TypeError(
-                    f"Predictive feature column '{col}' has non-numeric dtype '{df[col].dtype}'. "
-                    f"All predictive features must be numeric (int or float)."
+                    f"Predictive feature column '{col}' has non-numeric dtype '{dtype}'. "
+                    f"All predictive features must be numeric or boolean."
                 )
 
         # 4. Validate target label if required
@@ -161,7 +180,6 @@ class FeatureConfig:
 
             non_null_labels = df[self.label_column].dropna()
             unique_labels = set(non_null_labels.unique())
-            # Accept valid binary representations: {0, 1}, {0}, {1}, {False, True}
             valid_binary = {0, 1, False, True}
             if not unique_labels.issubset(valid_binary):
                 raise ValueError(

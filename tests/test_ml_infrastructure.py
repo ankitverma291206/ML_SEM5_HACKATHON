@@ -75,16 +75,16 @@ def synthetic_candidate_dataset() -> pd.DataFrame:
                         "road_bearing": float(np.random.uniform(0.0, 360.0)),
                         "gps_heading": float(np.random.uniform(0.0, 360.0)),
                         "heading_difference": heading_diff,
-                        "gps_speed": float(np.random.uniform(5.0, 25.0)),
-                        "time_delta": float(np.random.choice([1.0, 2.0, 5.0])),
-                        "segment_length": float(np.random.uniform(50.0, 300.0)),
+                        "gps_speed_mps": float(np.random.uniform(5.0, 25.0)),
+                        "time_delta_s": float(np.random.choice([1.0, 2.0, 5.0])),
+                        "large_or_invalid_time_gap": 0,
                         "is_matching_candidate": is_match,
                     }
                 )
 
     df = pd.DataFrame(rows)
     # Add a few intentional NaNs in numeric features to test imputer robustness
-    df.loc[3, "gps_speed"] = np.nan
+    df.loc[3, "gps_speed_mps"] = np.nan
     df.loc[7, "heading_difference"] = np.nan
     return df
 
@@ -329,4 +329,52 @@ def test_build_and_score_atharv_three_models(synthetic_candidate_dataset: pd.Dat
         assert len(scored) == len(candidates)
         assert (scored["prob_matching"] >= 0.0).all()
         assert (scored["prob_matching"] <= 1.0).all()
+
+
+def test_feature_leakage_rejection_reference_columns():
+    """Verify that reference alignment metadata (aligned_arc_id, etc.) are rejected as features."""
+    for ref_col in ["aligned_arc_id", "aligned_route_position", "alignment_distance_m"]:
+        with pytest.raises(ValueError, match="Reference alignment leakage hazard"):
+            FeatureConfig(feature_columns=["distance_m", ref_col])
+
+
+def test_schema_compatibility_with_real_trip_data():
+    """Verify that real labelled candidates generated from trip 00000001 validate against FeatureConfig."""
+    sample_csv = Path("experiments/labelled_candidates_00000001.csv")
+    if not sample_csv.exists():
+        pytest.skip("experiments/labelled_candidates_00000001.csv not present.")
+
+    df_sample = pd.read_csv(sample_csv, nrows=100)
+    config = FeatureConfig()
+    # Should validate without any schema or type errors
+    config.validate_dataframe(df_sample, require_label=True)
+    assert set(config.feature_columns).issubset(set(df_sample.columns))
+    assert set(config.identifier_columns).issubset(set(df_sample.columns))
+    assert config.label_column in df_sample.columns
+
+
+def test_missing_positive_candidate_coverage_accounting():
+    """Verify that observations without any positive candidate are quantified as misses."""
+    df_obs = pd.DataFrame(
+        {
+            "trip_id": ["00000001"] * 4,
+            "observation_id": [0, 0, 1, 1],
+            "arc_id": [10, 11, 20, 21],
+            "is_matching_candidate": [1, 0, 0, 0],  # obs 0 has positive candidate, obs 1 has NO positive candidate
+            "prob_matching": [0.8, 0.2, 0.6, 0.4],
+            "distance_m": [1.5, 12.0, 5.0, 18.0],
+            "projection_position": [0.1, 0.5, 0.2, 0.9],
+            "road_bearing": [10.0, 20.0, 30.0, 40.0],
+            "gps_heading": [12.0, 12.0, 35.0, 35.0],
+            "heading_difference": [2.0, 8.0, 5.0, 5.0],
+            "gps_speed_mps": [10.0, 10.0, 12.0, 12.0],
+            "time_delta_s": [1.0, 1.0, 1.0, 1.0],
+            "large_or_invalid_time_gap": [0, 0, 0, 0],
+        }
+    )
+
+    # obs 0 has positive candidate, obs 1 does not
+    miss_rate = compute_candidate_miss_rate(df_obs)
+    assert miss_rate == 0.5  # 1 of 2 observations lacks a positive candidate
+
 
