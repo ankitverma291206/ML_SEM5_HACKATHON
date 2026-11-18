@@ -81,6 +81,14 @@ python -m src.models.train_xgboost
 
 The script writes fold results and candidate-coverage diagnostics under `experiments/`, and saves `artifacts/xgboost_candidate_model.json` plus its feature/configuration metadata. Candidate miss rate measures the upstream candidate generator; a classifier cannot predict an arc that was never offered as a candidate. Sequence continuity will be evaluated separately after the HMM/Viterbi decoder is connected.
 
+If Windows blocks Pandas' compiled extension when training from a local virtual environment, the same training command can run inside the Linux Docker image:
+
+```bash
+docker compose run --build --rm pathsnap-api python -m src.models.train_xgboost
+```
+
+The Compose service mounts the dataset read-only and mounts `experiments/` and `artifacts/` so training inputs and outputs stay in the repository. Start Docker Desktop first. When training finishes, the model and reports will be available on the host in those folders.
+
 ## Project goal
 
 Build an end-to-end system that takes noisy GPS observations, identifies likely road segments, and reconstructs a coherent vehicle route using road-network information and an HMM/Viterbi decoder. The final application uses a two-laptop setup: a FastAPI backend on Laptop 1 and an evaluator-facing UI on Laptop 2.

@@ -1,7 +1,6 @@
 services:
   pathsnap-api:
     build: .
-    container_name: pathsnap-api
     ports:
       - "${PATHSNAP_PORT:-8000}:8000"
     environment:
@@ -17,6 +16,16 @@ services:
         source: ./data
         target: /app/data
         read_only: true
+        bind:
+          create_host_path: true
+      # Training reads and writes experiment CSVs in this host folder.
+      - type: bind
+        source: ./experiments
+        target: /app/experiments
+      # The trained model is written here and remains available on Windows.
+      - type: bind
+        source: ./artifacts
+        target: /app/artifacts
         bind:
           create_host_path: true
     restart: unless-stopped
