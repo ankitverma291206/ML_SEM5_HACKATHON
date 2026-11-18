@@ -2,7 +2,10 @@
 
 Implements leak-free, group-aware cross-validation objectives for hyperparameter tuning.
 Maintains full trial history, records evaluation metrics per trial, and exports
-tuning results for the hackathon deliverables.
+tuning results to experiments/optimization_trials.csv.
+
+Final Bayesian optimization is executed ONLY AFTER the initial five-model comparison
+has identified the most promising candidate.
 """
 
 from pathlib import Path
@@ -11,52 +14,58 @@ import numpy as np
 import optuna
 import pandas as pd
 from sklearn.model_selection import GroupKFold
+from sklearn.pipeline import Pipeline
 
 from src.models.config import FeatureConfig
+from src.models.decision_tree import build_decision_tree_pipeline
 from src.models.evaluate import Timer, evaluate_model_predictions
-from src.models.pipeline import build_model_pipeline, get_default_hyperparameters
+from src.models.knn import build_knn_pipeline
+from src.models.random_forest import build_random_forest_pipeline
 
 
-def define_search_space(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
+def sample_search_space(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
     """Define a scientifically principled hyperparameter search space for Optuna."""
-    name = model_name.lower().strip()
+    name = model_name.lower().replace(" ", "_").replace("-", "_")
 
-    if name == "hist_gradient_boosting":
+    if name in {"random_forest", "rf"}:
         return {
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
-            "max_iter": trial.suggest_int("max_iter", 50, 250, step=25),
-            "max_depth": trial.suggest_int("max_depth", 3, 12),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 10, 100, step=10),
-            "l2_regularization": trial.suggest_float("l2_regularization", 1e-4, 10.0, log=True),
+            "n_estimators": trial.suggest_int("n_estimators", 50, 250, step=25),
+            "max_depth": trial.suggest_int("max_depth", 4, 18),
+            "min_samples_split": trial.suggest_int("min_samples_split", 2, 26, step=2),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 15, step=1),
+            "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
+            "class_weight": trial.suggest_categorical("class_weight", [None, "balanced"]),
         }
-    elif name == "random_forest":
+    elif name in {"knn", "k_nearest_neighbours"}:
         return {
-            "n_estimators": trial.suggest_int("n_estimators", 50, 200, step=25),
-            "max_depth": trial.suggest_int("max_depth", 4, 16),
-            "min_samples_split": trial.suggest_int("min_samples_split", 5, 30, step=5),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 20, step=2),
-            "criterion": trial.suggest_categorical("criterion", ["gini", "entropy"]),
-        }
-    elif name == "decision_tree":
-        return {
-            "max_depth": trial.suggest_int("max_depth", 3, 15),
-            "min_samples_split": trial.suggest_int("min_samples_split", 5, 40, step=5),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 25, step=2),
-            "criterion": trial.suggest_categorical("criterion", ["gini", "entropy"]),
-        }
-    elif name == "logistic_regression":
-        return {
-            "C": trial.suggest_float("C", 1e-3, 100.0, log=True),
-            "solver": trial.suggest_categorical("solver", ["lbfgs", "saga"]),
-        }
-    elif name == "knn":
-        return {
-            "n_neighbors": trial.suggest_int("n_neighbors", 5, 35, step=2),
+            "n_neighbors": trial.suggest_int("n_neighbors", 5, 45, step=2),
             "weights": trial.suggest_categorical("weights", ["uniform", "distance"]),
+            "metric": trial.suggest_categorical("metric", ["minkowski", "manhattan"]),
             "p": trial.suggest_categorical("p", [1, 2]),
         }
+    elif name in {"decision_tree", "dt"}:
+        return {
+            "max_depth": trial.suggest_int("max_depth", 3, 16),
+            "min_samples_split": trial.suggest_int("min_samples_split", 2, 30, step=2),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 20, step=1),
+            "criterion": trial.suggest_categorical("criterion", ["gini", "entropy", "log_loss"]),
+            "class_weight": trial.suggest_categorical("class_weight", [None, "balanced"]),
+        }
     else:
-        raise ValueError(f"No search space defined for model: {model_name}")
+        raise ValueError(f"No search space defined for model: '{model_name}'.")
+
+
+def get_pipeline_factory_for_model(model_name: str) -> Callable[..., Pipeline]:
+    """Return pipeline builder for Atharv's models."""
+    name = model_name.lower().replace(" ", "_").replace("-", "_")
+    if name in {"random_forest", "rf"}:
+        return build_random_forest_pipeline
+    elif name in {"knn", "k_nearest_neighbours"}:
+        return build_knn_pipeline
+    elif name in {"decision_tree", "dt"}:
+        return build_decision_tree_pipeline
+    else:
+        raise ValueError(f"Unknown model name: '{model_name}'")
 
 
 class BayesianOptimizer:
@@ -66,14 +75,16 @@ class BayesianOptimizer:
         self,
         df_train: pd.DataFrame,
         model_name: str,
+        pipeline_factory: Optional[Callable[..., Pipeline]] = None,
         config: Optional[FeatureConfig] = None,
-        metric_to_optimize: str = "macro_f1",  # "macro_f1" or "top1_accuracy"
+        metric_to_optimize: str = "top1_accuracy",  # "top1_accuracy" or "macro_f1"
         n_splits: int = 5,
         random_seed: int = 42,
         output_dir: Union[str, Path] = "experiments",
     ) -> None:
         self.df_train = df_train
         self.model_name = model_name
+        self.pipeline_factory = pipeline_factory or get_pipeline_factory_for_model(model_name)
         self.config = config or FeatureConfig()
         self.metric_to_optimize = metric_to_optimize
         self.n_splits = n_splits
@@ -88,8 +99,8 @@ class BayesianOptimizer:
         self.optimization_time: float = 0.0
 
     def _objective(self, trial: optuna.Trial) -> float:
-        """Optuna objective function using GroupKFold on training trips."""
-        params = define_search_space(trial, self.model_name)
+        """Optuna objective function using GroupKFold cross-validation on training trips."""
+        params = sample_search_space(trial, self.model_name)
 
         trips = self.df_train["trip_id"].values
         unique_trips = np.unique(trips)
@@ -105,8 +116,8 @@ class BayesianOptimizer:
             X_tr, y_tr = X.iloc[train_idx], y[train_idx]
             X_va, y_va = X.iloc[val_idx], y[val_idx]
 
-            pipeline = build_model_pipeline(
-                self.model_name, self.config, custom_params=params
+            pipeline = self.pipeline_factory(
+                config=self.config, custom_params=params
             )
             pipeline.fit(X_tr, y_tr)
 
@@ -137,8 +148,10 @@ class BayesianOptimizer:
 
         return float(np.mean(fold_scores))
 
-    def run_optimization(self, n_trials: int = 30, timeout_seconds: Optional[int] = None) -> Dict[str, Any]:
-        """Run the TPE Bayesian optimization process."""
+    def run_optimization(
+        self, n_trials: int = 30, timeout_seconds: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Run Optuna TPE Bayesian optimization."""
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
         sampler = optuna.samplers.TPESampler(seed=self.random_seed)
@@ -160,7 +173,6 @@ class BayesianOptimizer:
         self.best_params = self.study.best_params
         self.best_metric_value = self.study.best_value
 
-        # Build trials DataFrame
         trials_data = []
         for trial in self.study.trials:
             if trial.state == optuna.trial.TrialState.COMPLETE:
@@ -183,9 +195,9 @@ class BayesianOptimizer:
         }
 
     def export_trials_csv(self) -> Path:
-        """Export the trial history to CSV."""
+        """Export trial history to CSV."""
         if self.trials_df is None or self.trials_df.empty:
-            raise RuntimeError("No trials have been run yet.")
+            raise RuntimeError("No optimization trials have been run yet.")
 
         csv_path = self.output_dir / "optimization_trials.csv"
         self.trials_df.to_csv(csv_path, index=False)

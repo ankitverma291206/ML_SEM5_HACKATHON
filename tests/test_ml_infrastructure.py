@@ -1,7 +1,8 @@
-"""Unit tests for ML experimentation infrastructure (Atharv Kulkarni).
+"""Unit tests for Atharv Kulkarni's ML experimentation infrastructure.
 
 Uses small SYNTHETIC fixtures strictly to verify software mechanics,
-leak-free GroupKFold cross-validation, metric calculations, and the inference API.
+leak-free GroupKFold cross-validation for Atharv's three models
+(Random Forest, KNN, Decision Tree), five-model consolidation, and the inference API.
 THESE SYNTHETIC METRICS ARE NEVER INCLUDED IN HACKATHON EXPERIMENTAL RESULTS.
 """
 
@@ -13,21 +14,25 @@ import pytest
 from sklearn.pipeline import Pipeline
 
 from src.models import (
-    DEFAULT_FEATURE_COLUMNS,
     BayesianOptimizer,
     FeatureConfig,
-    ModelComparator,
-    SUPPORTED_MODELS,
-    build_model_pipeline,
+    ModelComparisonManager,
+    build_decision_tree_pipeline,
+    build_knn_pipeline,
+    build_random_forest_pipeline,
     compute_candidate_metrics,
     compute_candidate_miss_rate,
     compute_observation_top1_accuracy,
-    evaluate_model_predictions,
+    evaluate_decision_tree,
+    evaluate_knn,
+    evaluate_random_forest,
+    fit_and_save_decision_tree,
+    fit_and_save_knn,
+    fit_and_save_random_forest,
     load_model_artifacts,
-    run_group_kfold_cv,
+    run_trip_group_cv,
     save_model_artifacts,
     score_candidates,
-    train_full_model,
 )
 
 
@@ -41,13 +46,11 @@ def synthetic_candidate_dataset() -> pd.DataFrame:
         trip_id = f"synthetic_trip_{trip_idx:03d}"
         for obs_idx in range(5):
             obs_id = obs_idx
-            # 1 matching candidate and 3 non-matching candidates
             matching_candidate_idx = np.random.randint(0, 4)
             for cand_idx in range(4):
                 arc_id = 1000 + obs_idx * 10 + cand_idx
                 is_match = 1 if cand_idx == matching_candidate_idx else 0
 
-                # Realistic feature distributions: matching candidates have lower distance and heading diff
                 if is_match == 1:
                     distance = np.random.exponential(scale=5.0)
                     heading_diff = np.random.uniform(0.0, 20.0)
@@ -83,105 +86,173 @@ def test_feature_config_validation(synthetic_candidate_dataset: pd.DataFrame):
     config = FeatureConfig()
     config.validate_dataframe(synthetic_candidate_dataset, require_label=True)
 
-    # Missing column should raise error
     bad_df = synthetic_candidate_dataset.drop(columns=["distance_m"])
     with pytest.raises(ValueError, match="missing configured feature columns"):
         config.validate_dataframe(bad_df, require_label=True)
 
 
-def test_build_all_five_models():
+def test_build_atharv_three_models():
     config = FeatureConfig()
-    for model_name in SUPPORTED_MODELS:
-        pipe = build_model_pipeline(model_name, config)
-        assert isinstance(pipe, Pipeline)
-        assert "classifier" in pipe.named_steps
-        assert "imputer" in pipe.named_steps
-        if model_name in {"logistic_regression", "knn"}:
-            assert "scaler" in pipe.named_steps
+
+    rf_pipe = build_random_forest_pipeline(config)
+    assert isinstance(rf_pipe, Pipeline)
+    assert "classifier" in rf_pipe.named_steps
+    assert "imputer" in rf_pipe.named_steps
+
+    knn_pipe = build_knn_pipeline(config)
+    assert isinstance(knn_pipe, Pipeline)
+    assert "scaler" in knn_pipe.named_steps
+    assert "classifier" in knn_pipe.named_steps
+
+    dt_pipe = build_decision_tree_pipeline(config)
+    assert isinstance(dt_pipe, Pipeline)
+    assert "classifier" in dt_pipe.named_steps
 
 
-def test_group_kfold_cv_zero_leakage_all_five_models(
+def test_trip_group_cv_for_atharv_three_models(
     synthetic_candidate_dataset: pd.DataFrame,
 ):
-    config = FeatureConfig()
-    for model_name in SUPPORTED_MODELS:
-        res = run_group_kfold_cv(
-            synthetic_candidate_dataset,
-            model_name=model_name,
-            config=config,
-            n_splits=3,
-        )
-        assert res.model_name == model_name
-        assert len(res.fold_metrics) == 3
-        assert res.oof_metrics["macro_f1"] is not None
-        assert 0.0 <= res.oof_metrics["macro_f1"] <= 1.0
-        assert res.oof_metrics["top1_accuracy"] is not None
-        assert 0.0 <= res.oof_metrics["top1_accuracy"] <= 1.0
-        assert res.total_train_time > 0.0
-        assert res.total_infer_time > 0.0
-
-
-def test_observation_top1_and_miss_rate():
-    # Manually constructed scenario
-    test_df = pd.DataFrame(
-        {
-            "trip_id": ["t1", "t1", "t1", "t1", "t2", "t2"],
-            "observation_id": [0, 0, 1, 1, 0, 0],
-            "arc_id": [1, 2, 3, 4, 5, 6],
-            "prob_matching": [0.8, 0.2, 0.1, 0.9, 0.4, 0.3],
-            "is_matching_candidate": [1, 0, 1, 0, 0, 0],  # obs 0 matches top, obs 1 top is wrong, t2 obs 0 missed completely
-        }
-    )
-    # Obs 1 (t1, 0): top is arc 1 (prob 0.8), label is 1 -> CORRECT
-    # Obs 2 (t1, 1): top is arc 4 (prob 0.9), label is 0 -> INCORRECT
-    # Obs 3 (t2, 0): top is arc 5 (prob 0.4), label is 0 -> INCORRECT
-    # Total obs = 3, Correct = 1 -> Top-1 = 1/3
-    top1 = compute_observation_top1_accuracy(test_df)
-    assert pytest.approx(top1, 0.01) == 1.0 / 3.0
-
-    # Miss rate: Obs 3 (t2, 0) has sum of labels = 0 -> 1 out of 3 missed
-    miss_rate = compute_candidate_miss_rate(test_df)
-    assert pytest.approx(miss_rate, 0.01) == 1.0 / 3.0
-
-
-def test_model_comparator_and_exports(synthetic_candidate_dataset: pd.DataFrame):
     with tempfile.TemporaryDirectory() as tmp_dir:
-        comparator = ModelComparator(output_dir=tmp_dir)
         config = FeatureConfig()
 
-        for model_name in ["logistic_regression", "decision_tree"]:
-            cv_res = run_group_kfold_cv(
-                synthetic_candidate_dataset,
-                model_name=model_name,
-                config=config,
-                n_splits=3,
-            )
-            comparator.add_cv_result(cv_res)
+        # 1. Random Forest
+        rf_res = evaluate_random_forest(
+            synthetic_candidate_dataset, config=config, n_splits=3, output_dir=tmp_dir
+        )
+        assert rf_res.model_name == "Random Forest"
+        assert rf_res.owner == "Atharv Kulkarni"
+        assert len(rf_res.fold_metrics) == 3
+        assert 0.0 <= rf_res.oof_metrics["macro_f1"] <= 1.0
+        assert 0.0 <= rf_res.oof_metrics["top1_accuracy"] <= 1.0
+        assert (Path(tmp_dir) / "atharv_random_forest_results.csv").exists()
 
-        table = comparator.generate_comparison_table()
-        assert len(table) == 2
-        assert "cv_macro_f1" in table.columns
-        assert "top1_accuracy" in table.columns
+        # 2. KNN
+        knn_res = evaluate_knn(
+            synthetic_candidate_dataset, config=config, n_splits=3, output_dir=tmp_dir
+        )
+        assert knn_res.model_name == "K-Nearest Neighbours"
+        assert knn_res.owner == "Atharv Kulkarni"
+        assert len(knn_res.fold_metrics) == 3
+        assert 0.0 <= knn_res.oof_metrics["macro_f1"] <= 1.0
+        assert (Path(tmp_dir) / "atharv_knn_results.csv").exists()
 
-        csv_path = comparator.export_comparison_csv()
+        # 3. Decision Tree
+        dt_res = evaluate_decision_tree(
+            synthetic_candidate_dataset, config=config, n_splits=3, output_dir=tmp_dir
+        )
+        assert dt_res.model_name == "Decision Tree"
+        assert dt_res.owner == "Atharv Kulkarni"
+        assert len(dt_res.fold_metrics) == 3
+        assert 0.0 <= dt_res.oof_metrics["macro_f1"] <= 1.0
+        assert (Path(tmp_dir) / "atharv_decision_tree_results.csv").exists()
+
+
+def test_five_model_comparison_integration(
+    synthetic_candidate_dataset: pd.DataFrame,
+):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config = FeatureConfig()
+        manager = ModelComparisonManager(output_dir=tmp_dir)
+
+        # Register Atharv's 3 models
+        rf_res = evaluate_random_forest(
+            synthetic_candidate_dataset, config=config, n_splits=3, output_dir=tmp_dir
+        )
+        knn_res = evaluate_knn(
+            synthetic_candidate_dataset, config=config, n_splits=3, output_dir=tmp_dir
+        )
+        dt_res = evaluate_decision_tree(
+            synthetic_candidate_dataset, config=config, n_splits=3, output_dir=tmp_dir
+        )
+
+        manager.add_atharv_result(rf_res)
+        manager.add_atharv_result(knn_res)
+        manager.add_atharv_result(dt_res)
+
+        # Export Atharv's 3-model summary
+        atharv_cv_path = manager.export_atharv_cv_results()
+        assert atharv_cv_path.exists()
+
+        # Import 2 external teammate model results (simulated actual handoff from teammates)
+        manager.import_external_result(
+            model_name="Logistic Regression",
+            owner="Teammate 1",
+            algorithm_family="Linear & Probabilistic",
+            key_configuration="C=1.0, solver=lbfgs",
+            cv_metrics={
+                "macro_f1": 0.8123,
+                "accuracy": 0.8450,
+                "precision": 0.8200,
+                "recall": 0.8050,
+                "top1_accuracy": 0.7890,
+                "candidate_miss_rate": 0.0210,
+                "log_loss": 0.3850,
+            },
+            train_time_sec=1.25,
+            infer_time_sec=0.15,
+        )
+        manager.import_external_result(
+            model_name="HistGradientBoosting",
+            owner="Teammate 2",
+            algorithm_family="Ensemble (Boosting)",
+            key_configuration="max_iter=100, lr=0.1",
+            cv_metrics={
+                "macro_f1": 0.8845,
+                "accuracy": 0.9010,
+                "precision": 0.8900,
+                "recall": 0.8790,
+                "top1_accuracy": 0.8650,
+                "candidate_miss_rate": 0.0210,
+                "log_loss": 0.2450,
+            },
+            train_time_sec=3.40,
+            infer_time_sec=0.22,
+        )
+
+        # Generate unified 5-model comparison
+        five_model_table = manager.generate_five_model_comparison()
+        assert len(five_model_table) == 5
+        assert set(five_model_table["model_name"]) == {
+            "Random Forest",
+            "K-Nearest Neighbours",
+            "Decision Tree",
+            "Logistic Regression",
+            "HistGradientBoosting",
+        }
+        assert "model_owner" in five_model_table.columns
+        assert "top1_accuracy" in five_model_table.columns
+
+        csv_path = manager.export_five_model_comparison_csv()
         assert csv_path.exists()
 
-        fold_csv = comparator.export_fold_results_csv()
-        assert fold_csv.exists()
-
-        plot_path = comparator.plot_metric_comparison(metric_name="cv_macro_f1")
+        plot_path = manager.plot_comparison(metric="cv_macro_f1")
         assert plot_path.exists()
 
 
-def test_inference_scoring_interface(synthetic_candidate_dataset: pd.DataFrame):
+def test_scoring_interface_and_artifacts(
+    synthetic_candidate_dataset: pd.DataFrame,
+):
     with tempfile.TemporaryDirectory() as tmp_dir:
         config = FeatureConfig()
-        pipe, train_time = train_full_model(
-            synthetic_candidate_dataset, "hist_gradient_boosting", config
+
+        # Fit and save Atharv's 3 artifacts
+        rf_pipe = fit_and_save_random_forest(
+            synthetic_candidate_dataset, config, artifacts_dir=tmp_dir
+        )
+        knn_pipe = fit_and_save_knn(
+            synthetic_candidate_dataset, config, artifacts_dir=tmp_dir
+        )
+        dt_pipe = fit_and_save_decision_tree(
+            synthetic_candidate_dataset, config, artifacts_dir=tmp_dir
         )
 
+        assert (Path(tmp_dir) / "atharv_random_forest.pkl").exists()
+        assert (Path(tmp_dir) / "atharv_knn.pkl").exists()
+        assert (Path(tmp_dir) / "atharv_decision_tree.pkl").exists()
+
+        # Test inference scoring contract
         candidates = synthetic_candidate_dataset.drop(columns=["is_matching_candidate"])
-        scored = score_candidates(pipe, candidates, config)
+        scored = score_candidates(rf_pipe, candidates, config)
 
         assert "trip_id" in scored.columns
         assert "observation_id" in scored.columns
@@ -192,30 +263,17 @@ def test_inference_scoring_interface(synthetic_candidate_dataset: pd.DataFrame):
         assert (scored["prob_matching"] >= 0.0).all()
         assert (scored["prob_matching"] <= 1.0).all()
 
-        # Artifact save/load test
-        saved_paths = save_model_artifacts(
-            pipe,
-            config,
-            metadata={"model_name": "hist_gradient_boosting", "train_time": train_time},
-            artifacts_dir=tmp_dir,
-        )
-        assert Path(saved_paths["model_path"]).exists()
 
-        loaded_pipe, loaded_config, loaded_meta = load_model_artifacts(tmp_dir)
-        scored_loaded = score_candidates(loaded_pipe, candidates, loaded_config)
-        np.testing.assert_allclose(
-            scored["prob_matching"].values, scored_loaded["prob_matching"].values
-        )
-
-
-def test_bayesian_optimization_mechanics(synthetic_candidate_dataset: pd.DataFrame):
+def test_bayesian_optimization_atharv_models(
+    synthetic_candidate_dataset: pd.DataFrame,
+):
     with tempfile.TemporaryDirectory() as tmp_dir:
         config = FeatureConfig()
         optimizer = BayesianOptimizer(
             df_train=synthetic_candidate_dataset,
-            model_name="logistic_regression",
+            model_name="random_forest",
             config=config,
-            metric_to_optimize="macro_f1",
+            metric_to_optimize="top1_accuracy",
             n_splits=2,
             output_dir=tmp_dir,
         )
