@@ -24,7 +24,7 @@ def audit_single_trip(
     trip_dir: Path,
     radius_m: float = 50.0,
     max_candidates: int = 8,
-) -> Tuple[pd.DataFrame, Dict[str, Any], List[Dict[str, Any]]]:
+) -> Tuple[pd.DataFrame, Dict[str, Any], List[Dict[str, Any]], pd.DataFrame]:
     """Process one trip and collect audit diagnostics."""
     data = load_trip(trip_dir, trip_id)
     n_obs = len(data["track"])
@@ -101,19 +101,22 @@ def audit_single_trip(
         "observations_alignment_gt_50m": len(high_dist_obs),
     }
 
-    return labelled, trip_audit, high_dist_records
+    return labelled, trip_audit, high_dist_records, alignment
 
 
 def build_and_audit_training_dataset(
     train_dir: Path = Path("Student folder/train"),
     output_data_dir: Path = Path("data/processed"),
     output_exp_dir: Path = Path("experiments"),
+    max_trips: int | None = 30,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Process all 80 training trips, generate dataset, and save audit reports."""
+    """Preprocess up to ``max_trips`` training trips and save audit reports."""
     output_data_dir.mkdir(parents=True, exist_ok=True)
     output_exp_dir.mkdir(parents=True, exist_ok=True)
 
     trip_dirs = sorted([d for d in train_dir.iterdir() if d.is_dir()])
+    if max_trips is not None:
+        trip_dirs = trip_dirs[:max_trips]
     print(f"Starting audit and dataset generation for {len(trip_dirs)} training trips...")
 
     all_labelled_dfs: List[pd.DataFrame] = []
@@ -125,10 +128,12 @@ def build_and_audit_training_dataset(
     for idx, trip_path in enumerate(trip_dirs):
         trip_id = trip_path.name
         t0 = time.perf_counter()
-        labelled_df, audit_info, high_dist = audit_single_trip(trip_id, trip_path)
+        labelled_df, audit_info, high_dist, alignment = audit_single_trip(trip_id, trip_path)
         elapsed = time.perf_counter() - t0
 
         all_labelled_dfs.append(labelled_df)
+        labelled_df.to_csv(output_exp_dir / f"labelled_candidates_{trip_id}.csv", index=False)
+        alignment.to_csv(output_exp_dir / f"alignment_{trip_id}.csv", index=False)
         audit_rows.append(audit_info)
         all_high_dist_records.extend(high_dist)
 
@@ -142,7 +147,7 @@ def build_and_audit_training_dataset(
             )
 
     total_time = time.perf_counter() - t_start
-    print(f"\nCompleted processing 80 trips in {total_time:.2f}s ({total_time/60:.2f} min).")
+    print(f"\nCompleted processing {len(trip_dirs)} trips in {total_time:.2f}s ({total_time/60:.2f} min).")
 
     # Combine into single training candidate dataset
     full_train_df = pd.concat(all_labelled_dfs, ignore_index=True)

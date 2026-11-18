@@ -78,12 +78,14 @@ class ViterbiRouteDecoder:
         reverse_transition_log_prob: float = -1.5,
         disconnected_penalty_log_prob: float = -10.0,
         min_emission_prob: float = 1e-4,
+        learned_transition_probs: Optional[Dict[str, Dict[str, float]]] = None,
     ) -> None:
         self.same_arc_log_prob = same_arc_log_prob
         self.direct_transition_log_prob = direct_transition_log_prob
         self.reverse_transition_log_prob = reverse_transition_log_prob
         self.disconnected_penalty_log_prob = disconnected_penalty_log_prob
         self.min_emission_prob = min_emission_prob
+        self.learned_transition_probs = learned_transition_probs or {}
 
     def decode_trip(
         self,
@@ -158,16 +160,20 @@ class ViterbiRouteDecoder:
 
                         # Calculate transition log-probability based on graph connectivity
                         if prev_arc == curr_arc:
-                            trans_log = self.same_arc_log_prob
+                            learned = self.learned_transition_probs.get("same_arc")
+                            trans_log = np.log(learned) if learned is not None else self.same_arc_log_prob
                         elif prev_to == curr_from:
                             # Forward connected transition
-                            trans_log = self.direct_transition_log_prob
+                            learned = self.learned_transition_probs.get("direct")
+                            trans_log = np.log(learned) if learned is not None else self.direct_transition_log_prob
                         elif prev_to == curr_to or prev_from == curr_from:
                             # Reverse or junction transition
-                            trans_log = self.reverse_transition_log_prob
+                            learned = self.learned_transition_probs.get("reverse_or_junction")
+                            trans_log = np.log(learned) if learned is not None else self.reverse_transition_log_prob
                         else:
                             # Disconnected transition penalty
-                            trans_log = self.disconnected_penalty_log_prob * (1.0 if obs_gap == 1 else 0.5)
+                            learned = self.learned_transition_probs.get("disconnected")
+                            trans_log = np.log(learned) if learned is not None else self.disconnected_penalty_log_prob * (1.0 if obs_gap == 1 else 0.5)
 
                         total_log = prev_log_prob + trans_log + curr_emit_log
 
