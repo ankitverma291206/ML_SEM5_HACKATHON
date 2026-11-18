@@ -378,3 +378,31 @@ def test_missing_positive_candidate_coverage_accounting():
     assert miss_rate == 0.5  # 1 of 2 observations lacks a positive candidate
 
 
+
+
+def test_viterbi_route_decoder_and_continuity():
+    """Verify that ViterbiRouteDecoder produces connected routes and improves continuity."""
+    from src.models.viterbi import ViterbiRouteDecoder, compute_route_continuity
+
+    arcs_df = pd.DataFrame({
+        "from_node_id": [0, 1, 2, 3],
+        "to_node_id": [1, 2, 3, 4],
+    })
+
+    # Trip with 4 observations, 2 candidates each
+    cands_df = pd.DataFrame({
+        "observation_id": [0, 0, 1, 1, 2, 2, 3, 3],
+        "arc_id": [0, 3, 1, 3, 2, 0, 3, 1],
+        "prob_matching": [0.9, 0.1, 0.85, 0.15, 0.88, 0.12, 0.95, 0.05],
+    })
+
+    decoder = ViterbiRouteDecoder()
+    decoded = decoder.decode_trip(cands_df, n_observations=4, arcs_df=arcs_df)
+
+    assert len(decoded) == 4
+    assert decoded == [0, 1, 2, 3]  # Perfectly connected route (0->1->2->3)
+
+    tot, val, rate = compute_route_continuity(decoded, arcs_df)
+    assert tot == 3
+    assert val == 3
+    assert rate == 1.0
