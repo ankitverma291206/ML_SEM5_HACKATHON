@@ -9,8 +9,10 @@ venv/
 .env.*
 !.env.example
 
-# Locally supplied final-evaluation data
+# Locally supplied data
+/data/
 data/evaluator_test/
 
 # Local application artifacts
 *.log
+.DS_Store
