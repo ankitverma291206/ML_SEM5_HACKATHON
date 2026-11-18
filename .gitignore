@@ -1,20 +1,63 @@
-# Python
+
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
-.venv/
-venv/
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Local configuration and secrets
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables & secrets
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.cert
+credentials.json
+secrets.json
 
-# Locally supplied data
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+*.log
+
+# Raw datasets, archives, and temporary downloads
+data/
 /data/
 data/evaluator_test/
+*.zip
+*.tar.gz
+*.rar
+*.7z
+Student folder/
+student_test/
+train/
+evaluator_test/
 
-# Local application artifacts
-*.log
-.DS_Store
+# Preserved project directories (never ignore tracking files)
+!artifacts/
+!experiments/
+!notebooks/
+
+# Ignore large binary artifacts exceeding GitHub's file size limits
+artifacts/atharv_knn.pkl
+experiments/*.parquet
+
+# Local application and generated experiment artifacts
 experiments/features/
 experiments/candidate_features_all.csv.gz

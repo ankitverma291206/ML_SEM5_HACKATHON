@@ -1,0 +1,9 @@
+{
+  "best_model_name": "Random Forest (Baseline)",
+  "cv_accuracy": 0.9150087749052458,
+  "cv_macro_f1": 0.8391833378105995,
+  "top1_accuracy": 0.6952839739560592,
+  "configuration": "n_trees=100, depth=12, split=10, leaf=4, class_weight=None",
+  "training_samples": 1084912,
+  "training_trips": 80
+}
