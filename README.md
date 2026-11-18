@@ -56,6 +56,57 @@ Example request body for `/predict`:
 
 When Laptop 2 hosts the UI, set `PATHSNAP_CORS_ORIGINS` to its exact browser origin(s), comma-separated. For a UI on another laptop, use the backend laptop's LAN IP and port 8000 as the API base URL; allow inbound TCP port 8000 on that laptop's firewall as needed.
 
+## XGBoost candidate-classification model
+
+The processed files currently available in `experiments/` are six labeled training trips: `00000001`, `00000002`, `00000019`, `00000033`, `00000042`, and `00000069`. They contain **165,381 candidate rows** and **21,680 positive candidate labels**. Their matching alignment files contain **26,562 GPS observations**. In these six trips, **4,882 observations (18.4%) have no correct candidate** in the generated candidate set. Trip `00000033` has the largest miss rate (about 67%), so candidate generation should be reviewed there.
+
+These are preliminary processed data, not all 80 training trips. Any cross-validation result from them is an early development result, not final evidence for choosing the project model. Run the preprocessing and labeling pipeline for the remaining training trips before drawing final conclusions. The model script refuses to train from candidate files whose trip IDs are not present in `Student folder/train/`.
+
+The readable, heavily commented training script is `src/models/train_xgboost.py`. It:
+
+1. Loads each labeled candidate file and its matching alignment file.
+2. Checks that trip IDs, candidate labels, and alignment files agree.
+3. Uses only geometric/movement features. It excludes trip/arc identifiers and reference labels from model inputs.
+4. Encodes bearings with sine and cosine so directions around 0°/360° are treated as neighbors. XGBoost handles missing feature values.
+5. Measures candidate Macro F1, precision, recall, and Log Loss; observation-level Top-1 accuracy; route continuity; candidate miss rate; inference time; route-level arc overlap; and GPS-to-road distance.
+6. Uses `GroupKFold` by trip. A trip is kept entirely in either training or validation for each fold.
+7. Fits one final model on the processed training trips and saves the model plus metadata.
+
+Every requested metric is included in the cross-validation output:
+
+| Metric | How this report calculates it |
+| --- | --- |
+| Macro F1 | Candidate-level F1 averaged across the matching/non-matching classes, using a 0.5 probability threshold |
+| Top-1 accuracy | Correct highest-scoring candidate divided by all aligned GPS observations; candidate misses count as incorrect |
+| Log Loss | Candidate-level probability log loss |
+| Route continuity | Share of consecutive predicted-observation pairs that stay on the same directed arc or connect at directed endpoints; pairs with a missing prediction are excluded and their count is visible in the report |
+| Candidate miss rate | Share of aligned observations where candidate generation supplied no correct arc |
+| Inference time | Mean milliseconds per held-out trip for model scoring and selecting the top candidate; excludes data loading and feature generation |
+| Precision and Recall | Candidate-level scores for the positive (matching arc) class at a 0.5 probability threshold |
+| Route-level accuracy | Mean per-trip Jaccard overlap between the unique predicted and reference arc sets; this does not account for route order |
+| GPS-to-road distance | Mean and 95th-percentile distance in metres from GPS points to their selected candidate arcs; only observations with a selected candidate contribute |
+
+The outputs include both `top1_accuracy_when_candidate_exists` and stricter `end_to_end_top1_accuracy`. They also report pooled route continuity, mean trip-level continuity, and route-transition coverage so missing predictions are visible. All requested metrics are printed as a readable mean ± standard-deviation table and saved to `experiments/xgboost_metrics_summary.csv`; fold-level details are saved in `experiments/xgboost_group_cv.csv`.
+
+Run from the repository root:
+
+```bash
+pip install -r requirements.txt
+python -m src.models.train_xgboost
+```
+
+The script writes fold results and candidate-coverage diagnostics under `experiments/`, and saves `artifacts/xgboost_candidate_model.json` plus its feature/configuration metadata. Candidate miss rate measures the upstream candidate generator; a classifier cannot predict an arc that was never offered as a candidate. Sequence continuity will be evaluated separately after the HMM/Viterbi decoder is connected.
+
+If Windows blocks Pandas' compiled extension when training from a local virtual environment, the same training command can run inside the Linux Docker image:
+
+```bash
+docker compose run --build --rm pathsnap-api python -m src.models.train_xgboost
+```
+
+The Compose service mounts the dataset read-only and mounts `experiments/` and `artifacts/` so training inputs and outputs stay in the repository. Start Docker Desktop first. When training finishes, the model and reports will be available on the host in those folders.
+
+Some managed networks use a private certificate authority for internet traffic. If the container build reports a PyPI certificate verification error, configure that trusted CA for Docker's Linux build environment before retrying. Do not disable HTTPS certificate verification.
+
 ## Project goal
 
 Build an end-to-end system that takes noisy GPS observations, identifies likely road segments, and reconstructs a coherent vehicle route using road-network information and an HMM/Viterbi decoder. The final application uses a two-laptop setup: a FastAPI backend on Laptop 1 and an evaluator-facing UI on Laptop 2.
