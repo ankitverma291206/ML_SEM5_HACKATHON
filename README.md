@@ -1,356 +1,116 @@
-# PathSnap — Team Work Plan
+# PathSnap
 
-**Project:** Distributed Map-Matching & Route Reconstruction  
-**Course:** UE24CS352A Machine Learning Hackathon  
-**Team size:** 4
+PathSnap matches noisy GPS observations to nearby directed road segments, then uses an HMM/Viterbi decoder to produce a connected route. The FastAPI service provides both the evaluator UI and the prediction API.
 
-This README is the team's working plan: it assigns ownership, defines component handoffs, and tracks the work toward the hackathon submission. The supplied hackathon PDFs define the mandatory requirements. Architecture choices and example models below are the team's proposed approach and should be validated against real experiments.
+## Run the app on Windows
 
-## Evaluator UI, FastAPI, and Docker quick start
+From PowerShell in the project directory:
 
-The repository includes a FastAPI service, Docker Compose setup, and browser evaluator at `/`. It can report health, list trips, return paginated GPS observations, and show checked-in student-test metrics. **Model and HMM inference are not integrated**, so `POST /predict` currently returns HTTP 503 with a clear message rather than inventing a route. Connect the real inference pipeline in `api/pipeline.py` when ready.
+```powershell
+cd "C:\Users\athar\OneDrive\Desktop\ML_SEM5_HACKATHON"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
 
-### Run with Docker Compose
+Open [http://localhost:8000/](http://localhost:8000/) for the UI or [http://localhost:8000/docs](http://localhost:8000/docs) for interactive API documentation. Keep the terminal running while using the app. The map uses OpenStreetMap tiles and Leaflet from public CDNs, so those map assets require internet access.
 
-From the repository root, with Docker Desktop/Docker Engine and the Compose plugin installed:
+## Evaluator UI and data partitions
 
-```bash
+Use the **Dataset partition** menu to switch between:
+
+- **Student test** — the ten development evaluation trips in `Student folder/student_test/`.
+- **Evaluator test** — the ten final evaluation trips in `data/evaluator_test/`.
+
+The evaluator ZIP is intentionally kept out of source control. To set it up on another machine, extract its `evaluator_test/` folder to `data/evaluator_test/`. The evaluator partition is used only for listing trips, inference, and evaluation. Training and preprocessing read from `Student folder/train/` and never include `data/evaluator_test/`.
+
+The UI loads GPS observations, then requests a predicted route. The API does not return reference-route labels to the UI.
+
+## Current model and validation
+
+The current route inference pipeline uses:
+
+1. Candidate generation from GPS points and each trip's road graph.
+2. An XGBoost candidate scorer with 20 engineered numeric inputs. It scores each possible road segment.
+3. A first-order road-arc HMM and Viterbi decoding. Transition probabilities are learned from labeled training routes; scorer probabilities act as emissions.
+
+The training scripts currently preprocess the first 30 training trips and use five-fold GroupKFold validation, keeping each trip entirely within one fold. The latest recorded 30-trip CV results are in `experiments/xgboost_group_cv_summary.csv` and `experiments/xgboost_group_cv.csv`:
+
+| Measure | Mean CV result | What it measures |
+| --- | ---: | --- |
+| Candidate accuracy | 90.67% | Candidate classification at a 0.5 threshold |
+| Candidate Macro F1 | 0.8248 | Candidate classification across both classes |
+| End-to-end Top-1 accuracy | 70.74% | Correct best candidate across all GPS observations; candidate misses count as wrong |
+| HMM route continuity | 97.31% | Share of consecutive decoded roads that connect, averaged across held-out trips |
+| HMM observation accuracy | 78.14% | Decoded arc matches the aligned arc at each observation |
+
+These are cross-validation results, not scores guaranteed on either test partition. Route continuity measures graph connectivity, not whether every predicted arc matches the reference. The HMM CV transition model is fit on each fold's training trips and evaluated on its held-out trips. The final persisted transition table is in `artifacts/hmm_transition_model.json`.
+
+## Rebuild preprocessing and models
+
+Run from the repository root using the active virtual environment:
+
+```powershell
+# Build candidate features and labels from 30 training trips
+python -m src.features.build_training_dataset
+
+# Train/evaluate XGBoost with 5-fold trip-grouped CV, then save its final scorer
+python -m src.models.train_xgboost
+
+# Fit the HMM transition table on the preprocessed training trips
+python -m src.models.train_hmm
+```
+
+The preprocessing writes candidate data under `data/processed/` and per-trip training CSVs and audit outputs under `experiments/`. The XGBoost run writes its fold results and summary under `experiments/`, and saves the scorer to `artifacts/xgboost_candidate_model.json`. The HMM training command writes `artifacts/hmm_transition_model.json`. `data/` is git-ignored; keep the authorized raw data locally.
+
+Other model code is in `src/models/`. Logistic Regression can be run with:
+
+```powershell
+python -m src.models.train_logistic_regression
+```
+
+Its input is the labeled candidate CSV files under `experiments/`; it writes evaluation output to that directory and saves the fitted estimator under `models/`.
+
+## API endpoints
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | API, data directory, and model readiness |
+| `GET` | `/trips?partition=student_test` | List trip IDs from the selected partition |
+| `GET` | `/trips/{trip_id}/observations?partition=evaluator_test&limit=2000` | Return GPS observations without reference labels |
+| `POST` | `/predict` | Generate candidates, score them, and return an HMM/Viterbi route |
+| `GET` | `/model-results` | Return saved model comparison metrics |
+| `GET` | `/hmm-status` | Return HMM training details and grouped-CV metrics |
+
+Example prediction request:
+
+```json
+{
+  "trip_id": "00000015",
+  "partition": "evaluator_test"
+}
+```
+
+The `partition` value must be `student_test` or `evaluator_test`. It defaults to `student_test` when omitted. The response includes map-ready `route` points and predicted arc IDs; it does not include the reference route.
+
+## Docker
+
+With Docker Desktop and Compose installed:
+
+```powershell
 docker compose up --build
 ```
 
-The API and UI listen on port 8000. Open `http://localhost:8000/` for the evaluator UI or `http://localhost:8000/docs` for the interactive API page. The default trip directory is the supplied `Student folder/student_test` partition, mounted read-only into the container. The repository's optional `data/` directory is also mounted read-only for later evaluator data.
-
-To point the service at another partition, set these values in a local `.env` file (do not commit it):
-
-```dotenv
-PATHSNAP_TRIPS_DIR=/app/data/evaluator_test
-PATHSNAP_PARTITION=evaluator_test
-```
-
-Place the authorized evaluator trip folders under `data/evaluator_test/` on the host. Keep reference labels server-side; the trip-list and observation endpoints do not return `.route` contents.
-
-### Run locally without Docker
-
-```bash
-python -m venv .venv
-# Windows: .venv\\Scripts\\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Open `http://localhost:8000/` for the evaluator UI. On the UI laptop, set its API field to `http://<API-laptop-LAN-IP>:8000`; allow inbound TCP port 8000 and add the UI browser origin to `PATHSNAP_CORS_ORIGINS` on the API laptop.
-
-Useful endpoints:
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Service, data-directory, and inference readiness |
-| `GET` | `/trips` | IDs in the configured partition |
-| `GET` | `/trips/{trip_id}/observations?offset=0&limit=500` | A page of GPS observations, without reference labels |
-| `POST` | `/predict` | Prediction integration point; returns 503 until the real pipeline is connected |
-
-Example request body for `/predict`:
-
-```json
-{"trip_id": "00000000"}
-```
-
-When Laptop 2 hosts the UI, set `PATHSNAP_CORS_ORIGINS` to its exact browser origin(s), comma-separated. For a UI on another laptop, use the backend laptop's LAN IP and port 8000 as the API base URL; allow inbound TCP port 8000 on that laptop's firewall as needed.
-
-## XGBoost candidate-classification model
-
-The processed files currently available in `experiments/` are six labeled training trips: `00000001`, `00000002`, `00000019`, `00000033`, `00000042`, and `00000069`. They contain **165,381 candidate rows** and **21,680 positive candidate labels**. Their matching alignment files contain **26,562 GPS observations**. In these six trips, **4,882 observations (18.4%) have no correct candidate** in the generated candidate set. Trip `00000033` has the largest miss rate (about 67%), so candidate generation should be reviewed there.
-
-These are preliminary processed data, not all 80 training trips. Any cross-validation result from them is an early development result, not final evidence for choosing the project model. Run the preprocessing and labeling pipeline for the remaining training trips before drawing final conclusions. The model script refuses to train from candidate files whose trip IDs are not present in `Student folder/train/`.
-
-The readable, heavily commented training script is `src/models/train_xgboost.py`. It:
-
-1. Loads each labeled candidate file and its matching alignment file.
-2. Checks that trip IDs, candidate labels, and alignment files agree.
-3. Uses only geometric/movement features. It excludes trip/arc identifiers and reference labels from model inputs.
-4. Encodes bearings with sine and cosine so directions around 0°/360° are treated as neighbors. XGBoost handles missing feature values.
-5. Measures candidate Macro F1, precision, recall, and Log Loss; observation-level Top-1 accuracy; route continuity; candidate miss rate; inference time; route-level arc overlap; and GPS-to-road distance.
-6. Uses `GroupKFold` by trip. A trip is kept entirely in either training or validation for each fold.
-7. Fits one final model on the processed training trips and saves the model plus metadata.
-
-Every requested metric is included in the cross-validation output:
-
-| Metric | How this report calculates it |
-| --- | --- |
-| Macro F1 | Candidate-level F1 averaged across the matching/non-matching classes, using a 0.5 probability threshold |
-| Top-1 accuracy | Correct highest-scoring candidate divided by all aligned GPS observations; candidate misses count as incorrect |
-| Log Loss | Candidate-level probability log loss |
-| Route continuity | Share of consecutive predicted-observation pairs that stay on the same directed arc or connect at directed endpoints; pairs with a missing prediction are excluded and their count is visible in the report |
-| Candidate miss rate | Share of aligned observations where candidate generation supplied no correct arc |
-| Inference time | Mean milliseconds per held-out trip for model scoring and selecting the top candidate; excludes data loading and feature generation |
-| Precision and Recall | Candidate-level scores for the positive (matching arc) class at a 0.5 probability threshold |
-| Route-level accuracy | Mean per-trip Jaccard overlap between the unique predicted and reference arc sets; this does not account for route order |
-| GPS-to-road distance | Mean and 95th-percentile distance in metres from GPS points to their selected candidate arcs; only observations with a selected candidate contribute |
-
-The outputs include both `top1_accuracy_when_candidate_exists` and stricter `end_to_end_top1_accuracy`. They also report pooled route continuity, mean trip-level continuity, and route-transition coverage so missing predictions are visible. All requested metrics are printed as a readable mean ± standard-deviation table and saved to `experiments/xgboost_metrics_summary.csv`; fold-level details are saved in `experiments/xgboost_group_cv.csv`.
-
-Run from the repository root:
-
-```bash
-pip install -r requirements.txt
-python -m src.models.train_xgboost
-```
-
-The script writes fold results and candidate-coverage diagnostics under `experiments/`, and saves `artifacts/xgboost_candidate_model.json` plus its feature/configuration metadata. Candidate miss rate measures the upstream candidate generator; a classifier cannot predict an arc that was never offered as a candidate. Sequence continuity will be evaluated separately after the HMM/Viterbi decoder is connected.
-
-If Windows blocks Pandas' compiled extension when training from a local virtual environment, the same training command can run inside the Linux Docker image:
-
-```bash
-docker compose run --build --rm pathsnap-api python -m src.models.train_xgboost
-```
-
-The Compose service mounts the dataset read-only and mounts `experiments/` and `artifacts/` so training inputs and outputs stay in the repository. Start Docker Desktop first. When training finishes, the model and reports will be available on the host in those folders.
-
-Some managed networks use a private certificate authority for internet traffic. If the container build reports a PyPI certificate verification error, configure that trusted CA for Docker's Linux build environment before retrying. Do not disable HTTPS certificate verification.
-
-## Project goal
-
-Build an end-to-end system that takes noisy GPS observations, identifies likely road segments, and reconstructs a coherent vehicle route using road-network information and an HMM/Viterbi decoder. The final application uses a two-laptop setup: a FastAPI backend on Laptop 1 and an evaluator-facing UI on Laptop 2.
-
-## Dataset and handling rules
-
-The supplied student dataset contains 80 `train` trips and 10 `student_test` trips. Each trip is organized with four whitespace-separated, headerless files:
-
-| File | Contents |
-| --- | --- |
-| `.track` | GPS longitude, latitude, timestamp observations |
-| `.nodes` | Road-network node longitude and latitude |
-| `.arcs` | Directed connections as `from_node_id` and `to_node_id`; row index is the `arc_id` |
-| `.route` | Ordered reference `arc_id` sequence |
-
-The number of GPS observations need not equal the number of route arcs. Establish and validate a sequence-aware alignment; do not pair rows by index. Arc IDs are local to a trip, so use `(trip_id, arc_id)` wherever IDs cross trip boundaries.
-
-The handout describes a further 10-trip `evaluator_test` partition, which is not included in the supplied ZIP. Keep this partition separate when it is provided. Use the 80 training trips for fitting, cross-validation, and optimization; use the 10 student-testing trips for development comparisons. Do not train on evaluator trips, tune against evaluator labels, expose evaluator ground truth to the model or UI, or hardcode expected predictions.
-
-Before modeling, validate file availability, parsing, coordinates, timestamps and gaps, route-to-arc references, graph connectivity, and candidate coverage. Treat the supplied routes as reference labels with possible limitations, and document assumptions. Fit learned preprocessing on permitted training data only.
-
-## Team ownership
-
-Each person owns one primary workstream. The whole team remains responsible for understanding and being able to explain the complete system.
-
-### Ankit Verma — Backend, UI, deployment, and integration
-
-**Primary output:** A working two-laptop application that runs the complete prediction pipeline.
-
-- Implement a FastAPI backend. Suggested endpoints: `GET /health`, `GET /trips`, and `POST /predict`.
-- Build the evaluator UI for trip selection, prediction, map display, result summaries, loading states, and errors. Streamlit is a proposed lightweight option; the handout does not mandate a UI framework.
-- Integrate data loading, candidate generation, feature extraction, the saved classifier, and route decoder.
-- Keep prediction separate from evaluation: inference receives GPS and road-network inputs, while reference labels remain server-side for evaluation. Never return evaluator ground-truth labels or routes to the UI.
-- Configure Laptop 1 (API) and Laptop 2 (UI) communication; make API request logs visible on Laptop 1.
-- Exercise the complete pipeline, invalid trip handling, and all 10 evaluator trips when they become available.
-- Provide deployment instructions, UI screenshots, and screenshots of successful API responses for the report.
-
-**Completion condition:** The UI can request a real prediction from the API and display its returned route and permitted results.
-
-### Atharv Kulkarni — Machine learning and experimentation
-
-**Primary output:** A reproducible, empirically selected classifier with saved artifacts and experiment records.
-
-- Train and compare at least five distinct models. Suggested starting set: Logistic Regression, K-Nearest Neighbours, Decision Tree, Random Forest, and HistGradientBoosting. These are suggestions, not prescribed algorithms.
-- Work with Aum to agree on candidate labels and feature-table schema before full training. A candidate-level positive/negative relevance classifier is one possible formulation; validate it against route alignment and the assignment metrics.
-- Use trip-grouped cross-validation (for example, `GroupKFold` by `trip_id`) so observations from a trip cannot leak across folds. Fit preprocessing within each training fold.
-- Record model configurations, seeds, training and inference times, fold results, and student-test results.
-- Report candidate-level and observation/route-level metrics distinctly. Include applicable accuracy, precision, recall, Macro F1, log loss, Top-1 accuracy, candidate miss rate, route continuity, and confusion matrices.
-- Select a promising model using measured generalization, probability quality, route relevance, and runtime—not training accuracy alone.
-- Perform Bayesian hyperparameter optimization on the selected model with group-aware CV on training trips; retain the search space, objective, trial history, best parameters, and computational cost. Compare tuned and untuned models on the same partitions and metrics.
-- Save the final model, preprocessing components, feature/model configuration, and experiment results for Ankit and Arya to consume.
-- Own the report sections on model experimentation, model comparison, visualizations, optimization, and selection rationale.
-
-**Completion condition:** Five or more models have genuinely been trained and compared, Bayesian optimization is reproducible, and the selected model supplies candidate scores/probabilities to the decoder.
-
-### Arya M G — HMM, Viterbi, and route reconstruction
-
-**Primary output:** A complete, evaluated sequence decoder that consumes classifier candidate scores.
-
-- Define hidden states as candidate road segments for each GPS observation and preserve candidate-to-arc correspondence.
-- Use classifier probabilities consistently as emission scores; document any additional emission evidence.
-- Model directed graph connectivity and transition likelihood. Consider graph travel distance, GPS displacement, time gaps, and heading consistency.
-- Implement Viterbi decoding with log probabilities and explicit handling for missing candidates, invalid transitions, long gaps, and disconnected components.
-- Return a predicted road segment for each relevant observation.
-- Compare classifier-only and classifier-plus-HMM predictions; report observation-level and sequence-level performance, continuity, and cases where decoding does not help. Tune decoder parameters using training and student-testing data only.
-- Generate actual Folium maps showing GPS observations, road-network geometry, reference route when available, and predicted route in distinct layers.
-- Own the report section on hidden states, emissions, transitions, Viterbi, gap handling, continuity, and decoder comparison.
-
-**Completion condition:** Given candidate scores and a trip graph, the decoder returns and evaluates a complete route sequence.
-
-### Aum Lavkumar Padia — Data engineering, EDA, and feature engineering
-
-**Primary output:** A validated data and candidate-feature pipeline for training and inference.
-
-- Build loaders and validation for `.track`, `.nodes`, `.arcs`, and `.route`; produce a trip inventory and data-quality summaries.
-- Investigate observations per trip, graph sizes and connectivity, isolated/disconnected components, timestamp intervals and large gaps, coordinate plausibility, route references, and candidate miss rate.
-- Build road-segment geometry from nodes and arcs. Investigate and validate a sequence-aware, monotonic GPS-to-reference-route alignment. Do not assume independent nearest-edge matches always form a correct sequence.
-- Generate nearby road-segment candidates efficiently with a spatial index. Use geodesic distances or suitable per-trip projected coordinates; do not use raw degree distances as physical distances.
-- Develop and document candidate features such as perpendicular distance, projection position, road bearing, GPS heading/speed, heading difference, time delta, and segment length. These are candidates for investigation, not a fixed required list.
-- Produce dataset inventory, data-quality and sampling summaries, trajectory/network visualizations, and alignment/candidate visualizations. Use Folium for geographic maps.
-- Hand off stable preprocessing, alignment, candidate-generation and feature APIs, labels, schema documentation, and validation examples to Atharv and Arya; provide the same inference-time functions to Ankit.
-- Own the report section on dataset understanding and EDA.
-
-**Completion condition:** Any permitted trip can be loaded, its graph reconstructed, GPS observations processed, and a validated candidate-feature dataset produced.
-
-## Component handoffs and shared contract
-
-Agree on function signatures and schemas early. Proposed end-to-end flow:
-
-```text
-Raw trip files
-  → Aum: loading, alignment, candidates, features
-  → Atharv: candidate scores/probabilities
-  → Arya: HMM/Viterbi route sequence
-  → Ankit: API, UI, server-side evaluation, deployment
-```
-
-| Owner → recipient | Handoff |
-| --- | --- |
-| Aum → Atharv | Candidate feature rows, labels, trip groups, schema, and validation notes |
-| Aum → Arya | Directed road graph, route alignment, candidate-to-arc mapping |
-| Atharv → Arya | Loadable classifier and candidate scoring interface |
-| Aum → Ankit | Data loading, preprocessing, candidate and feature inference functions |
-| Atharv → Ankit | Model-loading and scoring interface plus artifact/configuration requirements |
-| Arya → Ankit | Decoder interface, predicted route representation, and evaluation outputs |
-| Ankit → team | Integrated application, API contract, run instructions, integration status |
-
-Proposed candidate table (revise and freeze with the team before full integration):
-
-```text
-trip_id, observation_id, arc_id, distance_m, projection_position,
-road_bearing, gps_heading, heading_difference, gps_speed, time_delta,
-is_matching_candidate
-```
-
-`is_matching_candidate` is a training/evaluation label, not an inference input. Keep reference-route labels out of the evaluator prediction request and UI. Document any schema changes and update all consumers together.
-
-## Milestones
-
-The handout mentions a first-phase evaluation before the lunch break; the dates and remaining deadlines are not specified here. Set team calendar dates separately and prioritize a real, demonstrable vertical slice early.
-
-1. **Repository, data audit, and interfaces:** All members participate. Establish project structure, loaders, inventory, initial API/UI skeleton, and agreed schemas. **Exit:** permitted trips load and all component interfaces are agreed.
-2. **Preprocessing and baseline vertical slice:** Aum leads data processing; Arya reviews alignment; Atharv trains an initial baseline; Ankit connects an actual trip through the API/UI. **Exit:** one real trip completes inference without hardcoded predictions.
-3. **Model experimentation:** Atharv leads five-model training and group-aware CV; Aum supports feature/coverage analysis. **Exit:** reproducible logs, comparison table, and evidence-based candidate model selection.
-4. **Optimization and decoder:** Atharv runs Bayesian optimization; Arya implements and evaluates HMM/Viterbi. **Exit:** tuning record and classifier-only versus decoded results on permitted partitions.
-5. **Application integration:** Ankit leads two-laptop deployment and connects all components. **Exit:** working API/UI with protected ground truth and documented setup.
-6. **Evaluation and submission:** All members verify the full pipeline, prepare actual maps/results/report, and test the 10 reserved evaluator trips when supplied. **Exit:** both required deliverables are complete and reproducible.
-
-## Submission requirements
-
-The hackathon requires exactly two final deliverables.
-
-### 1. Public GitHub repository
-
-Commit the complete source code used for data processing, feature engineering, every model experiment, evaluation, Bayesian optimization, HMM/Viterbi, API, UI, visualization, and deployment. Include the README, dependencies, run/deployment instructions, relevant configurations, experiment records, and necessary model artifacts. Do not commit secrets. Keep raw data out of the repository unless the event explicitly permits it; document how authorized data should be placed locally.
-
-Suggested organization (adapt to the implementation):
-
-```text
-PathSnap/
-├── README.md
-├── requirements.txt
-├── .gitignore
-├── data/                  # local data instructions; avoid committing restricted raw data
-├── src/
-│   ├── data/
-│   ├── features/
-│   ├── models/
-│   ├── decoder/
-│   ├── visualization/
-│   ├── api/
-│   └── ui/
-├── artifacts/             # required model/config artifacts, subject to size constraints
-├── experiments/           # actual results, logs, and figures
-├── maps/                  # generated maps as appropriate
-└── report/                # consolidated report PDF
-```
-
-### 2. One consolidated technical report PDF
-
-Include actual, verifiable analysis and results. At minimum cover:
-
-- Dataset preprocessing, EDA, missing/invalid values, trajectory and road-network visualizations, Folium map, features and partition used for each analysis.
-- Every model actually trained, a consolidated comparison table, configurations, strengths/limitations, measured performance, and appropriate model comparison plots.
-- Cross-validation Macro F1; student-test Top-1 accuracy and Macro F1; log loss where applicable; actual training histories only for models that produce them.
-- Bayesian search parameters/ranges, objective, trial count/history, best values, computational cost, and tuned-versus-untuned comparison.
-- HMM state, emission and transition definitions, gap/disconnection handling, and classifier-only versus HMM results.
-- Folium maps generated by the implementation, with GPS, road network, reference (where available), and predicted route layers; include a representative exported view in the PDF and commit the map/code.
-- Working UI screenshots and successful API-response screenshots from the receiving laptop.
-- API, UI, and deployment explanation; ensure report metrics and claims can be reproduced from the repository.
-
-Suggested report ownership:
-
-| Section | Owner(s) |
-| --- | --- |
-| Dataset understanding and EDA | Aum |
-| Model experimentation/comparison and Bayesian optimization | Atharv |
-| HMM/Viterbi and route reconstruction | Arya |
-| Geographical maps | Aum + Arya |
-| API, UI, deployment and screenshots | Ankit |
-| Introduction, conclusion, proofreading and final consistency | All four |
-
-## Experiment and integrity rules
-
-- Train and compare at least five models and retain actual configurations and results.
-- Use trip-aware validation on the 80 training trips. Student testing is for development-stage comparisons; evaluator testing is final evaluation only.
-- Do not fabricate metrics, charts, training curves, maps, citations, or experiment records. Report only work actually run and explain limitations.
-- Do not share code, weights, configurations, derived datasets, or experimental results with other teams. Follow the event's AI disclosure rules; every teammate must understand and defend the submitted work.
-- Keep evaluator ground truth server-side. The inference model and UI must not receive it, and predictions must not be hardcoded.
-
-## Team progress checklist
-
-### Aum — Data engineering
-
-- [ ] Validate loaders and inventory all supplied trips/files
-- [ ] Produce data-quality, sampling, and graph-connectivity summaries
-- [ ] Validate GPS-to-route alignment
-- [ ] Implement spatial candidate generation and documented features
-- [ ] Generate EDA, alignment, and Folium visualizations
-- [ ] Hand off stable feature schema and inference functions
-
-### Atharv — Machine learning
-
-- [ ] Train at least five distinct models
-- [ ] Implement trip-grouped cross-validation
-- [ ] Record candidate-level and observation/route-level metrics
-- [ ] Compare models and justify selection from results
-- [ ] Run Bayesian hyperparameter optimization and retain trial history
-- [ ] Export model, preprocessing, configuration, and results
-
-### Arya — Route reconstruction
-
-- [ ] Define hidden states and candidate correspondence
-- [ ] Implement emissions, transitions, and Viterbi decoding
-- [ ] Handle missing candidates, long gaps, invalid transitions, and disconnected components
-- [ ] Compare classifier-only and classifier-plus-HMM results
-- [ ] Measure route continuity and generate predicted-route maps
-
-### Ankit — Backend and deployment
-
-- [ ] Implement FastAPI health, trip-list, and prediction endpoints
-- [ ] Build evaluator UI and map/results display
-- [ ] Integrate preprocessing, model, and decoder interfaces
-- [ ] Protect server-side reference labels
-- [ ] Configure two-laptop networking and visible API logs
-- [ ] Capture UI/API evidence and document deployment
-- [ ] Run the full evaluator set when it is supplied
-
-## Main risks to manage
-
-1. **GPS-to-route alignment:** Incorrect labels undermine model and decoder evaluation. Validate alignment visually and quantitatively before large experiments.
-2. **Trip leakage:** Never randomly split observations in a way that puts one trip in both training and validation.
-3. **Irregular timestamps and large gaps:** Make time-aware feature and decoder behavior explicit.
-4. **Disconnected road graphs:** Treat unreachable transitions as such; do not assume the full graph is connected.
-5. **Candidate misses:** Report when the reference segment is absent from the candidate set; a classifier cannot recover a missing candidate.
-6. **Ground-truth leakage:** Keep evaluator labels separate from prediction inputs and UI responses.
-7. **Late integration:** Maintain a real-data vertical slice early and use the handoff contracts above.
-8. **Unsupported claims:** Re-run data audits and experiments in the repository and report verified outputs only.
-
-## Immediate next steps
-
-1. Confirm this ownership split and agree on the candidate/decoder/API data contracts.
-2. Aum builds the validated dataset loader and alignment investigation; Ankit scaffolds the API/UI and project run instructions in parallel.
-3. Connect one permitted trip end to end with a baseline model before scaling to all experiments.
-4. Track actual progress in the checklists and replace this plan's suggested choices with evidence-backed decisions as the work develops.
+Then open [http://localhost:8000/](http://localhost:8000/). Compose mounts `Student folder/`, `data/`, `experiments/`, and `artifacts/` into the container. Keep the evaluator files in `data/evaluator_test/` on the Docker host; the `data/` mount is read-only in the container.
+
+## Repository map
+
+- `api/` — FastAPI endpoints, partition-aware trip access, candidate scoring, and route prediction.
+- `ui/index.html` — Evaluator interface, partition selector, map, metrics, and HMM details.
+- `src/data/` — Trip file loading and data checks.
+- `src/features/` — Candidate generation, labeling, and training preprocessing.
+- `src/graph/` — Road-network helpers.
+- `src/models/` — Classifiers, validation, metrics, optimization, HMM training, and Viterbi decoding.
+- `artifacts/` — Saved model and HMM parameters needed by inference.
+- `experiments/` — Cross-validation results, metrics, and diagnostics.

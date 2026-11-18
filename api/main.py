@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import csv
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -17,6 +18,7 @@ from api.pipeline import PredictionPipelineUnavailable, is_ready, predict
 
 class PredictionRequest(BaseModel):
     trip_id: str = Field(pattern=r"^\d{8}$", description="Eight-digit trip ID")
+    partition: Literal["student_test", "evaluator_test"] = "student_test"
 
 
 app = FastAPI(
@@ -125,11 +127,11 @@ def health() -> dict:
 
 
 @app.get("/trips", tags=["trips"])
-def get_trips() -> dict:
+def get_trips(partition: Literal["student_test", "evaluator_test"] = "student_test") -> dict:
     """List IDs from the configured partition; no labels or routes are returned."""
-    ids = list_trip_ids(str(configured_trips_dir()))
+    ids = list_trip_ids(str(configured_trips_dir(partition)))
     return {
-        "partition": os.getenv("PATHSNAP_PARTITION", "student_test"),
+        "partition": partition,
         "count": len(ids),
         "trips": [{"trip_id": trip_id} for trip_id in ids],
     }
@@ -138,10 +140,11 @@ def get_trips() -> dict:
 @app.get("/trips/{trip_id}/observations", tags=["trips"])
 def get_observations(
     trip_id: str,
+    partition: Literal["student_test", "evaluator_test"] = "student_test",
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict:
-    return observations(trip_id, offset, limit)
+    return observations(trip_id, offset, limit, partition)
 
 
 @app.post("/predict", tags=["inference"])
@@ -150,8 +153,8 @@ def predict_trip(request: PredictionRequest) -> dict:
     # Validate the trip ID against the configured partition before inference.
     from api.data import _trip_files
 
-    _trip_files(request.trip_id)
+    _trip_files(request.trip_id, request.partition)
     try:
-        return predict(request.trip_id)
+        return predict(request.trip_id, request.partition)
     except PredictionPipelineUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
