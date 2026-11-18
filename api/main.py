@@ -46,13 +46,41 @@ def evaluator_ui():
 
 @app.get("/model-results", tags=["evaluation"])
 def model_results() -> dict:
-    """Return the checked-in student-test comparison, if it is available."""
+    """Return recorded model results without filling gaps with estimates."""
     path = Path(__file__).resolve().parents[1] / "experiments" / "atharv_student_test_results.csv"
-    if not path.is_file():
-        return {"models": []}
-    with path.open("r", newline="", encoding="utf-8") as stream:
-        rows = list(csv.DictReader(stream))
-    return {"models": rows, "source": "experiments/atharv_student_test_results.csv"}
+    rows = []
+    if path.is_file():
+        with path.open("r", newline="", encoding="utf-8") as stream:
+            for row in csv.DictReader(stream):
+                rows.append({
+                    "model_name": row["model_name"], "partition": "Student test",
+                    "test_accuracy": row.get("test_accuracy"),
+                    "test_macro_f1": row.get("test_macro_f1"),
+                    "test_top1_accuracy": row.get("test_top1_accuracy"),
+                    "test_log_loss": row.get("test_log_loss"),
+                    "note": "Recorded student-test metrics",
+                })
+
+    # These are six-trip, group-CV results, not student-test measurements.
+    cv_path = Path(__file__).resolve().parents[1] / "experiments" / "xgboost_group_cv_summary.csv"
+    if cv_path.is_file():
+        with cv_path.open("r", newline="", encoding="utf-8") as stream:
+            cv = {r["metric"]: r["mean"] for r in csv.DictReader(stream)}
+        rows.append({
+            "model_name": "XGBoost", "partition": "Group CV (6 trips)",
+            "test_accuracy": None, "test_macro_f1": cv.get("candidate_macro_f1"),
+            "test_top1_accuracy": cv.get("end_to_end_top1_accuracy"),
+            "test_log_loss": cv.get("candidate_log_loss"),
+            "note": "Preliminary CV; no student-test result recorded",
+        })
+
+    rows.append({
+        "model_name": "Logistic Regression", "partition": "Not evaluated",
+        "test_accuracy": None, "test_macro_f1": None,
+        "test_top1_accuracy": None, "test_log_loss": None,
+        "note": "Training script exists; no saved metrics found",
+    })
+    return {"models": rows}
 
 
 @app.get("/health", tags=["system"])
