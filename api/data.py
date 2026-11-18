@@ -11,22 +11,27 @@ from fastapi import HTTPException
 REQUIRED_SUFFIXES = ("track", "nodes", "arcs", "route")
 
 
-def configured_trips_dir() -> Path:
-    """Resolve the trip directory from the environment or repository layout."""
+def configured_trips_dir(partition: str | None = None) -> Path:
+    """Resolve either evaluation partition without mixing their trip files."""
     import os
 
-    configured = os.getenv("PATHSNAP_TRIPS_DIR")
-    if configured:
-        return Path(configured).expanduser().resolve()
     repository_root = Path(__file__).resolve().parents[1]
+    partition = partition or os.getenv("PATHSNAP_PARTITION", "student_test")
+    if partition not in {"student_test", "evaluator_test"}:
+        raise HTTPException(status_code=400, detail="partition must be student_test or evaluator_test")
+    configured = os.getenv("PATHSNAP_TRIPS_DIR")
+    if configured and partition == os.getenv("PATHSNAP_PARTITION", "student_test"):
+        return Path(configured).expanduser().resolve()
+    if partition == "evaluator_test":
+        return repository_root / "data" / "evaluator_test"
     return repository_root / "Student folder" / "student_test"
 
 
-def _trip_files(trip_id: str) -> dict[str, Path]:
+def _trip_files(trip_id: str, partition: str | None = None) -> dict[str, Path]:
     if len(trip_id) != 8 or not trip_id.isdecimal():
         raise HTTPException(status_code=400, detail="trip_id must be an 8-digit ID")
 
-    trip_dir = configured_trips_dir() / trip_id
+    trip_dir = configured_trips_dir(partition) / trip_id
     files = {suffix: trip_dir / f"{trip_id}.{suffix}" for suffix in REQUIRED_SUFFIXES}
     if not trip_dir.is_dir() or not all(path.is_file() for path in files.values()):
         raise HTTPException(status_code=404, detail="Trip not found in the configured partition")
@@ -46,9 +51,9 @@ def list_trip_ids(directory: str) -> tuple[str, ...]:
     return tuple(sorted(ids))
 
 
-def observations(trip_id: str, offset: int, limit: int) -> dict:
+def observations(trip_id: str, offset: int, limit: int, partition: str | None = None) -> dict:
     """Return a page of GPS observations. Reference labels are never returned."""
-    track_path = _trip_files(trip_id)["track"]
+    track_path = _trip_files(trip_id, partition)["track"]
     points = []
     with track_path.open("r", encoding="utf-8") as stream:
         for row_index, line in enumerate(stream):
@@ -70,4 +75,4 @@ def observations(trip_id: str, offset: int, limit: int) -> dict:
                 "timestamp": timestamp,
             })
 
-    return {"trip_id": trip_id, "offset": offset, "limit": limit, "observations": points}
+    return {"trip_id": trip_id, "partition": partition or "student_test", "offset": offset, "limit": limit, "observations": points}

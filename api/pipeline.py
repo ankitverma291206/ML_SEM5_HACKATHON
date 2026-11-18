@@ -36,13 +36,13 @@ def is_ready() -> bool:
     return MODEL_PATH.is_file() and HMM_PATH.is_file()
 
 
-def predict(trip_id: str) -> dict:
+def predict(trip_id: str, partition: str = "student_test") -> dict:
     """Predict candidate scores, Viterbi decode, and return map-ready route points."""
-    files = _trip_files(trip_id)
+    files = _trip_files(trip_id, partition)
     trip = load_trip(files["track"].parent, trip_id)
     candidates = generate_candidates(trip, trip_id=trip_id)
     if candidates.empty:
-        return {"trip_id": trip_id, "route": [], "predicted_arcs": [], "observations": len(trip["track"]), "message": "No road candidates were found."}
+        return {"trip_id": trip_id, "partition": partition, "route": [], "predicted_arcs": [], "observations": len(trip["track"]), "message": "No road candidates were found."}
 
     candidates = candidates.copy()
     candidates["prob_matching"] = _model().predict_proba(make_model_features(candidates))[:, 1]
@@ -67,6 +67,7 @@ def predict(trip_id: str) -> dict:
                 route.append(point)
     return {
         "trip_id": trip_id,
+        "partition": partition,
         "route": route,
         "predicted_arcs": decoded,
         "observations": len(trip["track"]),
