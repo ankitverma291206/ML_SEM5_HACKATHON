@@ -148,6 +148,16 @@ def run_trip_group_cv(
         val_df["prob_matching"] = y_prob
         val_df["fold"] = fold_idx
 
+        # Select the raw observations belonging to that validation fold's trips
+        fold_obs_inventory = None
+        if all_observations is not None:
+            if isinstance(all_observations, pd.DataFrame):
+                fold_obs_inventory = all_observations[
+                    all_observations["trip_id"].astype(str).isin({str(t) for t in val_trips})
+                ]
+            else:
+                fold_obs_inventory = all_observations
+
         # Fold evaluation
         f_eval = evaluate_model_predictions(
             val_df,
@@ -156,7 +166,7 @@ def run_trip_group_cv(
             label_col=config.label_column,
             trip_col="trip_id",
             obs_col="observation_id",
-            all_observations=all_observations,
+            all_observations=fold_obs_inventory,
         )
         f_eval["fold"] = fold_idx
         f_eval["train_time"] = fold_train_time

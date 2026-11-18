@@ -27,6 +27,7 @@ from src.models.validation import ModelCVResult, run_trip_group_cv
 DEFAULT_KNN_PARAMS: Dict[str, Any] = {
     "n_neighbors": 15,
     "weights": "distance",
+    "algorithm": "kd_tree",
     "metric": "minkowski",
     "p": 2,
     "n_jobs": -1,
@@ -63,6 +64,7 @@ def evaluate_knn(
     custom_params: Optional[Dict[str, Any]] = None,
     n_splits: int = 5,
     output_dir: Union[str, Path] = "experiments",
+    all_observations: Optional[Union[int, pd.DataFrame]] = None,
 ) -> ModelCVResult:
     """Run trip-grouped cross-validation for KNN and export fold metrics."""
     if config is None:
@@ -80,6 +82,7 @@ def evaluate_knn(
         config=config,
         n_splits=n_splits,
         custom_params=params,
+        all_observations=all_observations,
     )
 
     out_dir = Path(output_dir)

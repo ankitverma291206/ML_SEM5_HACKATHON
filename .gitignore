@@ -52,3 +52,8 @@ evaluator_test/
 !artifacts/
 !experiments/
 !notebooks/
+
+# Ignore large binary artifacts exceeding GitHub's file size limits
+artifacts/atharv_knn.pkl
+experiments/*.parquet
+

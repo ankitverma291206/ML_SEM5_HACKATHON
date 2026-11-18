@@ -66,6 +66,7 @@ def evaluate_random_forest(
     custom_params: Optional[Dict[str, Any]] = None,
     n_splits: int = 5,
     output_dir: Union[str, Path] = "experiments",
+    all_observations: Optional[Union[int, pd.DataFrame]] = None,
 ) -> ModelCVResult:
     """Run trip-grouped cross-validation for Random Forest and export fold metrics."""
     if config is None:
@@ -83,6 +84,7 @@ def evaluate_random_forest(
         config=config,
         n_splits=n_splits,
         custom_params=params,
+        all_observations=all_observations,
     )
 
     # Export fold results
