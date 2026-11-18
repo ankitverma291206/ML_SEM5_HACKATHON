@@ -1,0 +1,11 @@
+.git
+.context_materials
+Student folder/
+data/
+__pycache__
+*.py[cod]
+.venv
+venv
+.env
+artifacts
+experiments

@@ -6,6 +6,56 @@
 
 This README is the team's working plan: it assigns ownership, defines component handoffs, and tracks the work toward the hackathon submission. The supplied hackathon PDFs define the mandatory requirements. Architecture choices and example models below are the team's proposed approach and should be validated against real experiments.
 
+## FastAPI and Docker quick start
+
+The repository includes an initial FastAPI service and Docker Compose setup. It can report health, list trips in the configured partition, and return paginated GPS observations. **The model and HMM have not been implemented yet**, so `POST /predict` currently returns HTTP 503 with a clear message instead of inventing a route. Replace the integration point in `api/pipeline.py` when the real inference pipeline is ready.
+
+### Run with Docker Compose
+
+From the repository root, with Docker Desktop/Docker Engine and the Compose plugin installed:
+
+```bash
+docker compose up --build
+```
+
+The API listens on port 8000. Open `http://localhost:8000/docs` for the interactive API page. The default trip directory is the supplied `Student folder/student_test` partition, mounted read-only into the container. The repository's optional `data/` directory is also mounted read-only for later evaluator data.
+
+To point the service at another partition, set these values in a local `.env` file (do not commit it):
+
+```dotenv
+PATHSNAP_TRIPS_DIR=/app/data/evaluator_test
+PATHSNAP_PARTITION=evaluator_test
+```
+
+Place the authorized evaluator trip folders under `data/evaluator_test/` on the host. Keep reference labels server-side; the trip-list and observation endpoints do not return `.route` contents.
+
+### Run locally without Docker
+
+```bash
+python -m venv .venv
+# Windows: .venv\\Scripts\\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Useful endpoints:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service, data-directory, and inference readiness |
+| `GET` | `/trips` | IDs in the configured partition |
+| `GET` | `/trips/{trip_id}/observations?offset=0&limit=500` | A page of GPS observations, without reference labels |
+| `POST` | `/predict` | Prediction integration point; returns 503 until the real pipeline is connected |
+
+Example request body for `/predict`:
+
+```json
+{"trip_id": "00000000"}
+```
+
+When Laptop 2 hosts the UI, set `PATHSNAP_CORS_ORIGINS` to its exact browser origin(s), comma-separated. For a UI on another laptop, use the backend laptop's LAN IP and port 8000 as the API base URL; allow inbound TCP port 8000 on that laptop's firewall as needed.
+
 ## Project goal
 
 Build an end-to-end system that takes noisy GPS observations, identifies likely road segments, and reconstructs a coherent vehicle route using road-network information and an HMM/Viterbi decoder. The final application uses a two-laptop setup: a FastAPI backend on Laptop 1 and an evaluator-facing UI on Laptop 2.

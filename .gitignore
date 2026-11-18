@@ -33,9 +33,12 @@ secrets.json
 *.sublime-workspace
 .DS_Store
 Thumbs.db
+*.log
 
 # Raw datasets, archives, and temporary downloads
 data/
+/data/
+data/evaluator_test/
 *.zip
 *.tar.gz
 *.rar
