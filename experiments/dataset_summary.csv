@@ -1,0 +1,9 @@
+partition,file_type,trips,rows_min,rows_median,rows_max,total_bytes
+student_test,.arcs,10,3577,13145.0,56027,1902157
+student_test,.nodes,10,1770,6596.5,26635,1822179
+student_test,.route,10,95,250.0,1323,18344
+student_test,.track,10,262,1420.0,3958,625911
+train,.arcs,80,649,19526.5,307392,44267751
+train,.nodes,80,299,9608.0,155003,38431647
+train,.route,80,59,280.0,2266,165702
+train,.track,80,361,1529.0,19313,6872352

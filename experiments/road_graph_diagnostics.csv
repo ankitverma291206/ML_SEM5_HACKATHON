@@ -1,0 +1,2 @@
+trip_id,nodes,directed_arcs,weak_components,isolated_nodes,duplicate_endpoint_pairs,self_loops,route_transitions,route_discontinuities,route_discontinuity_rate,mean_arc_length_m,median_arc_length_m,zero_length_arcs
+00000001,88809,165790,175,0,292,0,524,0,0.0,39.62743873208712,20.198012404949797,8
