@@ -1,13 +1,13 @@
 """Evaluation metrics for candidate-level and observation-level model assessment.
 
-Provides both row-level classification metrics (Accuracy, Precision, Recall, Macro F1,
-Confusion Matrix, Log Loss) and domain-specific observation-level metrics (Top-1 Accuracy,
-Candidate Miss Rate), along with time-measurement utilities.
+Provides row-level classification metrics (Accuracy, Precision, Recall, Macro F1,
+Confusion Matrix, Log Loss) and observation-level metrics (Top-1 Accuracy,
+Candidate Miss Rate), with support for raw GPS observation inventories and
+zero-candidate observations.
 """
 
 import time
-from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -51,16 +51,7 @@ def compute_candidate_metrics(
     y_pred: Union[np.ndarray, List[int], pd.Series],
     y_prob: Optional[Union[np.ndarray, List[float], pd.Series]] = None,
 ) -> Dict[str, Any]:
-    """Compute candidate-level binary classification metrics.
-
-    Args:
-        y_true: Binary ground truth labels (0 or 1).
-        y_pred: Binary predicted labels (0 or 1).
-        y_prob: Predicted probability for positive class (1).
-
-    Returns:
-        Dictionary of computed metrics including Macro F1 and confusion matrix.
-    """
+    """Compute candidate-level binary classification metrics."""
     y_true_arr = np.asarray(y_true).astype(int)
     y_pred_arr = np.asarray(y_pred).astype(int)
 
@@ -85,11 +76,9 @@ def compute_candidate_metrics(
 
     if y_prob is not None:
         y_prob_arr = np.asarray(y_prob, dtype=float)
-        # Clip probabilities to prevent log_loss numerical instability
         eps = 1e-15
         y_prob_arr = np.clip(y_prob_arr, eps, 1.0 - eps)
         try:
-            # Need 2D probabilities for log_loss with classes [0, 1]
             prob_matrix = np.column_stack([1.0 - y_prob_arr, y_prob_arr])
             loss_val = float(log_loss(y_true_arr, prob_matrix, labels=[0, 1]))
             metrics["log_loss"] = loss_val
@@ -107,37 +96,32 @@ def compute_observation_top1_accuracy(
     label_col: str = "is_matching_candidate",
     trip_col: str = "trip_id",
     obs_col: str = "observation_id",
+    all_observations: Optional[Union[int, pd.DataFrame]] = None,
 ) -> float:
     """Compute Observation-level Top-1 Accuracy.
 
-    For each GPS observation (grouped by trip_id and observation_id), select the
-    candidate with the highest predicted positive-class probability. If that top
-    candidate has label == 1, the observation is counted as correct.
+    For each GPS observation, select the candidate with highest predicted probability.
+    If that top candidate has label == 1, the observation is correctly matched.
 
-    Args:
-        df: DataFrame containing candidate rows with predictions and true labels.
-        prob_col: Name of predicted probability column.
-        label_col: Name of ground-truth candidate label column.
-        trip_col: Trip identifier column.
-        obs_col: Observation identifier column within the trip.
-
-    Returns:
-        Top-1 accuracy as a float in [0.0, 1.0].
+    If all_observations is provided (as a raw observation DataFrame or total count),
+    observations with zero candidates are treated as incorrect (not matched).
     """
     if df.empty:
         return 0.0
 
-    # Sort candidates by predicted probability descending within each observation
     sorted_df = df.sort_values(
         by=[trip_col, obs_col, prob_col], ascending=[True, True, False]
     )
-
-    # Take the top candidate for each observation
     top_candidates = sorted_df.drop_duplicates(subset=[trip_col, obs_col], keep="first")
-
-    # Correct if the top candidate has matching label == 1
     correct_count = int((top_candidates[label_col] == 1).sum())
-    total_obs = int(len(top_candidates))
+
+    if all_observations is not None:
+        if isinstance(all_observations, pd.DataFrame):
+            total_obs = len(all_observations.drop_duplicates(subset=[trip_col, obs_col]))
+        else:
+            total_obs = int(all_observations)
+    else:
+        total_obs = len(top_candidates)
 
     return float(correct_count / total_obs) if total_obs > 0 else 0.0
 
@@ -147,31 +131,54 @@ def compute_candidate_miss_rate(
     label_col: str = "is_matching_candidate",
     trip_col: str = "trip_id",
     obs_col: str = "observation_id",
+    all_observations: Optional[Union[int, pd.DataFrame]] = None,
 ) -> float:
-    """Compute the Candidate Miss Rate from the candidate generation stage.
+    """Compute Candidate Miss Rate from the candidate generation stage.
 
-    Measures the fraction of observations where NONE of the proposed candidates
-    matched the true reference road arc (i.e., sum of positive labels for that
-    observation is 0). If a true segment was never retrieved as a candidate,
-    no downstream classifier can predict it correctly.
+    Measures the fraction of GPS observations where NONE of the proposed
+    candidates matched the true reference road arc.
+
+    Crucially, observations with ZERO generated candidates in `df` are included
+    when `all_observations` (e.g. from the raw .track inventory) is provided,
+    correcting the miss-rate denominator.
 
     Args:
-        df: DataFrame containing candidate rows with true labels.
-        label_col: Ground truth label column.
+        df: Candidate rows DataFrame.
+        label_col: Binary match label column.
         trip_col: Trip identifier column.
         obs_col: Observation identifier column.
+        all_observations: Total observation count or DataFrame of all raw observations.
 
     Returns:
-        Fraction of observations missing their true road segment in the candidate set.
+        Miss rate in [0.0, 1.0].
     """
     if df.empty:
+        if all_observations is not None:
+            return 1.0
         return 0.0
 
+    # Observations present in df with at least one matching candidate
     obs_grouped = df.groupby([trip_col, obs_col])[label_col].max()
-    total_observations = len(obs_grouped)
-    missed_observations = int((obs_grouped == 0).sum())
+    observations_with_match = set(obs_grouped[obs_grouped == 1].index)
 
-    return float(missed_observations / total_observations) if total_observations > 0 else 0.0
+    if all_observations is not None:
+        if isinstance(all_observations, pd.DataFrame):
+            raw_obs_set = set(
+                zip(all_observations[trip_col].values, all_observations[obs_col].values)
+            )
+            total_observations = len(raw_obs_set)
+            # Missed observations = total raw observations - raw observations that found a match
+            missed_count = len(raw_obs_set - observations_with_match)
+        else:
+            total_observations = int(all_observations)
+            found_count = len(observations_with_match)
+            missed_count = max(0, total_observations - found_count)
+    else:
+        # Fallback to observations present in candidate table
+        total_observations = len(obs_grouped)
+        missed_count = int((obs_grouped == 0).sum())
+
+    return float(missed_count / total_observations) if total_observations > 0 else 0.0
 
 
 def evaluate_model_predictions(
@@ -181,6 +188,7 @@ def evaluate_model_predictions(
     label_col: str = "is_matching_candidate",
     trip_col: str = "trip_id",
     obs_col: str = "observation_id",
+    all_observations: Optional[Union[int, pd.DataFrame]] = None,
 ) -> Dict[str, Any]:
     """Comprehensive evaluation combining candidate-level and observation-level metrics."""
     y_true = df_eval[label_col].values
@@ -196,6 +204,7 @@ def evaluate_model_predictions(
             label_col=label_col,
             trip_col=trip_col,
             obs_col=obs_col,
+            all_observations=all_observations,
         )
     else:
         results["top1_accuracy"] = None
@@ -205,6 +214,7 @@ def evaluate_model_predictions(
         label_col=label_col,
         trip_col=trip_col,
         obs_col=obs_col,
+        all_observations=all_observations,
     )
 
     return results

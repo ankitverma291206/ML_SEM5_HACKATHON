@@ -15,6 +15,7 @@ from src.models.config import (
     DEFAULT_IDENTIFIER_COLUMNS,
     DEFAULT_LABEL_COLUMN,
     FeatureConfig,
+    encode_circular_angles,
 )
 from src.models.decision_tree import (
     build_decision_tree_pipeline,
@@ -34,8 +35,9 @@ from src.models.knn import (
     fit_and_save_knn,
 )
 from src.models.model_comparison import (
-    ALGORITHM_FAMILIES,
     ModelComparisonManager,
+    ModelExperimentMetadata,
+    validate_experiment_comparability,
 )
 from src.models.random_forest import (
     build_random_forest_pipeline,
@@ -53,6 +55,7 @@ from src.models.validation import (
     run_trip_group_cv,
 )
 from src.models.bayesian_optimization import (
+    VALID_OPTIMIZATION_METRICS,
     BayesianOptimizer,
     sample_search_space,
 )
@@ -62,6 +65,7 @@ __all__ = [
     "DEFAULT_IDENTIFIER_COLUMNS",
     "DEFAULT_LABEL_COLUMN",
     "FeatureConfig",
+    "encode_circular_angles",
     "Timer",
     "compute_candidate_metrics",
     "compute_candidate_miss_rate",
@@ -70,8 +74,9 @@ __all__ = [
     "load_model_artifacts",
     "save_model_artifacts",
     "score_candidates",
-    "ALGORITHM_FAMILIES",
     "ModelComparisonManager",
+    "ModelExperimentMetadata",
+    "validate_experiment_comparability",
     "ModelCVResult",
     "get_positive_class_index",
     "run_trip_group_cv",
@@ -84,6 +89,7 @@ __all__ = [
     "build_decision_tree_pipeline",
     "evaluate_decision_tree",
     "fit_and_save_decision_tree",
+    "VALID_OPTIMIZATION_METRICS",
     "BayesianOptimizer",
     "sample_search_space",
 ]

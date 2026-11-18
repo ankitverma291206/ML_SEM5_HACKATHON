@@ -1,11 +1,11 @@
 """Bayesian hyperparameter optimization framework using Optuna and TPE.
 
 Implements leak-free, group-aware cross-validation objectives for hyperparameter tuning.
-Maintains full trial history, records evaluation metrics per trial, and exports
-tuning results to experiments/optimization_trials.csv.
+Maintains full trial history, records fold-level metrics and overall out-of-fold performance,
+and exports tuning results to experiments/optimization_trials.csv.
 
-Final Bayesian optimization is executed ONLY AFTER the initial five-model comparison
-has identified the most promising candidate.
+Final Bayesian optimization is kept disabled until the initial five-model comparison
+is available and a promising model is selected based on experimental evidence.
 """
 
 from pathlib import Path
@@ -21,6 +21,16 @@ from src.models.decision_tree import build_decision_tree_pipeline
 from src.models.evaluate import Timer, evaluate_model_predictions
 from src.models.knn import build_knn_pipeline
 from src.models.random_forest import build_random_forest_pipeline
+from src.models.validation import get_positive_class_index
+
+
+VALID_OPTIMIZATION_METRICS = {
+    "top1_accuracy",
+    "macro_f1",
+    "accuracy",
+    "precision",
+    "recall",
+}
 
 
 def sample_search_space(trial: optuna.Trial, model_name: str) -> Dict[str, Any]:
@@ -77,11 +87,17 @@ class BayesianOptimizer:
         model_name: str,
         pipeline_factory: Optional[Callable[..., Pipeline]] = None,
         config: Optional[FeatureConfig] = None,
-        metric_to_optimize: str = "top1_accuracy",  # "top1_accuracy" or "macro_f1"
+        metric_to_optimize: str = "top1_accuracy",
         n_splits: int = 5,
         random_seed: int = 42,
         output_dir: Union[str, Path] = "experiments",
     ) -> None:
+        if metric_to_optimize not in VALID_OPTIMIZATION_METRICS:
+            raise ValueError(
+                f"Invalid optimization metric '{metric_to_optimize}'. "
+                f"Choose from: {sorted(VALID_OPTIMIZATION_METRICS)}"
+            )
+
         self.df_train = df_train
         self.model_name = model_name
         self.pipeline_factory = pipeline_factory or get_pipeline_factory_for_model(model_name)
@@ -98,8 +114,19 @@ class BayesianOptimizer:
         self.best_metric_value: Optional[float] = None
         self.optimization_time: float = 0.0
 
+        # Optimization remains locked until the initial 5-model comparison is finalized
+        self._is_enabled: bool = False
+
+    def enable_optimization(self) -> None:
+        """Unlock Bayesian optimization after 5-model comparison is completed."""
+        self._is_enabled = True
+
     def _objective(self, trial: optuna.Trial) -> float:
-        """Optuna objective function using GroupKFold cross-validation on training trips."""
+        """Optuna objective function using leak-free GroupKFold cross-validation on training trips.
+
+        Supports out-of-fold pooled aggregation across all validation folds
+        to compute realistic Top-1 Accuracy and Macro F1 scores.
+        """
         params = sample_search_space(trial, self.model_name)
 
         trips = self.df_train["trip_id"].values
@@ -107,12 +134,13 @@ class BayesianOptimizer:
         splits = min(self.n_splits, len(unique_trips))
 
         gkf = GroupKFold(n_splits=splits)
+        fold_val_dfs: List[pd.DataFrame] = []
         fold_scores: List[float] = []
 
         X = self.df_train[self.config.feature_columns]
         y = self.df_train[self.config.label_column].values
 
-        for train_idx, val_idx in gkf.split(X, y, groups=trips):
+        for fold_idx, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=trips)):
             X_tr, y_tr = X.iloc[train_idx], y[train_idx]
             X_va, y_va = X.iloc[val_idx], y[val_idx]
 
@@ -125,14 +153,14 @@ class BayesianOptimizer:
             y_pred = pipeline.predict(X_va)
             val_df["pred_matching"] = y_pred
 
-            if hasattr(pipeline.named_steps["classifier"], "predict_proba"):
-                classes = list(pipeline.named_steps["classifier"].classes_)
-                pos_idx = classes.index(1) if 1 in classes else 1
+            classifier = pipeline.named_steps["classifier"]
+            if hasattr(classifier, "predict_proba"):
+                pos_idx = get_positive_class_index(pipeline, pos_label=1)
                 val_df["prob_matching"] = pipeline.predict_proba(X_va)[:, pos_idx]
             else:
                 val_df["prob_matching"] = y_pred.astype(float)
 
-            res = evaluate_model_predictions(
+            f_res = evaluate_model_predictions(
                 val_df,
                 pred_col="pred_matching",
                 prob_col="prob_matching",
@@ -140,18 +168,49 @@ class BayesianOptimizer:
                 trip_col="trip_id",
                 obs_col="observation_id",
             )
+            fold_score = f_res.get(self.metric_to_optimize, 0.0)
+            fold_scores.append(fold_score)
+            fold_val_dfs.append(val_df)
 
-            score = res.get(self.metric_to_optimize)
-            if score is None:
-                score = res.get("macro_f1", 0.0)
-            fold_scores.append(score)
+        # Pooled Out-Of-Fold aggregation across all validation partitions
+        oof_df = pd.concat(fold_val_dfs, axis=0)
+        oof_eval = evaluate_model_predictions(
+            oof_df,
+            pred_col="pred_matching",
+            prob_col="prob_matching",
+            label_col=self.config.label_column,
+            trip_col="trip_id",
+            obs_col="observation_id",
+        )
 
-        return float(np.mean(fold_scores))
+        # Record metrics in trial attributes
+        trial.set_user_attr("oof_top1_accuracy", oof_eval.get("top1_accuracy"))
+        trial.set_user_attr("oof_macro_f1", oof_eval.get("macro_f1"))
+        trial.set_user_attr("mean_fold_score", float(np.mean(fold_scores)))
+
+        target_score = oof_eval.get(self.metric_to_optimize)
+        return float(target_score) if target_score is not None else float(np.mean(fold_scores))
 
     def run_optimization(
-        self, n_trials: int = 30, timeout_seconds: Optional[int] = None
+        self,
+        n_trials: int = 30,
+        timeout_seconds: Optional[int] = None,
+        allow_synthetic_test: bool = False,
     ) -> Dict[str, Any]:
-        """Run Optuna TPE Bayesian optimization."""
+        """Run Optuna TPE Bayesian optimization.
+
+        Raises:
+            RuntimeError: If called before 5-model comparison is completed and
+                          enable_optimization() has not been unlocked.
+        """
+        if not self._is_enabled and not allow_synthetic_test:
+            raise RuntimeError(
+                "Bayesian optimization is locked. Per the hackathon guidelines, "
+                "hyperparameter tuning must only be executed AFTER all five baseline "
+                "models have been compared on identical partitions and the best "
+                "candidate model is empirically selected."
+            )
+
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
         sampler = optuna.samplers.TPESampler(seed=self.random_seed)
@@ -180,6 +239,8 @@ class BayesianOptimizer:
                     "trial_number": trial.number,
                     "value": trial.value,
                     "duration_sec": trial.duration.total_seconds() if trial.duration else None,
+                    "oof_top1_accuracy": trial.user_attrs.get("oof_top1_accuracy"),
+                    "oof_macro_f1": trial.user_attrs.get("oof_macro_f1"),
                     **trial.params,
                 }
                 trials_data.append(row)

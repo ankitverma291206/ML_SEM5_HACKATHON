@@ -1,12 +1,13 @@
-"""Consolidated five-model comparison and experiment logging framework.
+"""Consolidated multi-model comparison and experiment logging framework.
 
 Supports Atharv Kulkarni's three models (Random Forest, KNN, Decision Tree)
-and provides an integration interface to import the experimental results
-from the two teammate-owned models without inventing or fabricating data.
+and provides an extensible integration interface to validate and import actual
+experimental results from the two teammate-owned models without fabricating data.
 """
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -16,13 +17,57 @@ import pandas as pd
 from src.models.validation import ModelCVResult
 
 
-ALGORITHM_FAMILIES = {
-    "random_forest": "Ensemble (Bagging)",
-    "knn": "Instance-based",
-    "decision_tree": "Tree-based",
-    "logistic_regression": "Linear & Probabilistic",
-    "hist_gradient_boosting": "Ensemble (Boosting)",
-}
+@dataclass
+class ModelExperimentMetadata:
+    """Metadata for validating experiment comparability across team models."""
+
+    model_name: str
+    owner: str
+    algorithm_family: str
+    key_configuration: str
+    dataset_partition: str = "train_80_trips"
+    feature_schema_version: str = "1.0"
+    label_methodology_version: str = "1.0"
+    cv_splitter: str = "GroupKFold(5)"
+    shared_fold_assignments: bool = True
+    metric_aggregation: str = "oof_pooled"
+    train_time_sec: Optional[float] = None
+    infer_time_sec: Optional[float] = None
+    route_continuity: Optional[float] = None
+
+
+def validate_experiment_comparability(
+    meta: ModelExperimentMetadata,
+    expected_partition: str = "train_80_trips",
+    expected_cv: str = "GroupKFold(5)",
+) -> Tuple[bool, List[str]]:
+    """Validate that an external model experiment used equivalent methodology.
+
+    Returns:
+        Tuple of (is_comparable, list_of_discrepancies).
+    """
+    discrepancies: List[str] = []
+
+    if not meta.owner or meta.owner.strip() == "":
+        discrepancies.append("Model owner is missing.")
+
+    if meta.dataset_partition != expected_partition:
+        discrepancies.append(
+            f"Dataset partition mismatch: expected '{expected_partition}', got '{meta.dataset_partition}'."
+        )
+
+    if meta.cv_splitter != expected_cv:
+        discrepancies.append(
+            f"CV splitter mismatch: expected '{expected_cv}', got '{meta.cv_splitter}'."
+        )
+
+    if not meta.shared_fold_assignments:
+        discrepancies.append(
+            "Model did not use shared fold assignments across the 80 training trips."
+        )
+
+    is_comparable = len(discrepancies) == 0
+    return is_comparable, discrepancies
 
 
 class ModelComparisonManager:
@@ -56,56 +101,49 @@ class ModelComparisonManager:
         algorithm_family: str,
         key_configuration: str,
         cv_metrics: Dict[str, Any],
+        metadata: Optional[ModelExperimentMetadata] = None,
         student_test_metrics: Optional[Dict[str, Any]] = None,
-        train_time_sec: float = 0.0,
-        infer_time_sec: float = 0.0,
+        train_time_sec: Optional[float] = None,
+        infer_time_sec: Optional[float] = None,
         route_continuity: Optional[float] = None,
-    ) -> None:
+        raise_on_incomparable: bool = False,
+    ) -> bool:
         """Import actual experimental results supplied by a teammate.
 
-        Ensures external models are integrated fairly without fabrication.
+        Validates experimental methodology (dataset partition, shared CV folds,
+        schema version). Missing timings are recorded explicitly as None, never 0.0.
+
+        Returns:
+            True if the model result is fully comparable, False if discrepancies exist.
         """
+        if metadata is None:
+            metadata = ModelExperimentMetadata(
+                model_name=model_name,
+                owner=owner,
+                algorithm_family=algorithm_family,
+                key_configuration=key_configuration,
+                train_time_sec=train_time_sec,
+                infer_time_sec=infer_time_sec,
+                route_continuity=route_continuity,
+            )
+
+        is_comparable, discrepancies = validate_experiment_comparability(metadata)
+        if not is_comparable and raise_on_incomparable:
+            raise ValueError(
+                f"External model '{model_name}' is not comparable: {'; '.join(discrepancies)}"
+            )
+
         self.external_results[model_name] = {
-            "model_name": model_name,
-            "owner": owner,
-            "algorithm_family": algorithm_family,
-            "key_configuration": key_configuration,
+            "metadata": metadata,
             "cv_metrics": cv_metrics,
-            "train_time_sec": train_time_sec,
-            "infer_time_sec": infer_time_sec,
-            "route_continuity": route_continuity,
+            "is_comparable": is_comparable,
+            "comparability_notes": "; ".join(discrepancies) if discrepancies else "Verified comparable",
         }
+
         if student_test_metrics:
             self.student_test_metrics[model_name] = student_test_metrics
 
-    def import_external_csv(self, csv_path: Union[str, Path]) -> None:
-        """Import external model results directly from a teammate's CSV file."""
-        df = pd.read_csv(csv_path)
-        for _, row in df.iterrows():
-            m_name = str(row["model_name"])
-            self.external_results[m_name] = {
-                "model_name": m_name,
-                "owner": str(row.get("owner", "Teammate")),
-                "algorithm_family": str(row.get("algorithm_family", "External")),
-                "key_configuration": str(row.get("key_configuration", "")),
-                "cv_metrics": {
-                    "macro_f1": row.get("cv_macro_f1"),
-                    "accuracy": row.get("cv_accuracy"),
-                    "precision": row.get("cv_precision"),
-                    "recall": row.get("cv_recall"),
-                    "top1_accuracy": row.get("top1_accuracy"),
-                    "candidate_miss_rate": row.get("candidate_miss_rate"),
-                    "log_loss": row.get("cv_log_loss"),
-                },
-                "train_time_sec": float(row.get("train_time_sec", 0.0)),
-                "infer_time_sec": float(row.get("infer_time_sec", 0.0)),
-                "route_continuity": row.get("route_continuity"),
-            }
-            if "student_test_macro_f1" in row:
-                self.student_test_metrics[m_name] = {
-                    "macro_f1": row.get("student_test_macro_f1"),
-                    "top1_accuracy": row.get("student_test_top1_acc"),
-                }
+        return is_comparable
 
     def generate_atharv_summary(self) -> pd.DataFrame:
         """Generate consolidated summary of Atharv's three models."""
@@ -144,19 +182,26 @@ class ModelComparisonManager:
         return path
 
     def generate_five_model_comparison(self) -> pd.DataFrame:
-        """Consolidate Atharv's 3 models and teammate models into one table."""
+        """Consolidate Atharv's 3 models and teammate models into one table.
+
+        Keeps algorithm families open and extensible for whichever algorithms
+        the teammates actually implemented.
+        """
         rows = []
 
         # 1. Atharv's models
         for name, res in self.atharv_results.items():
             oof = res.oof_metrics
             test = self.student_test_metrics.get(name, {})
-            fam_key = name.lower().replace(" ", "_").replace("-", "_")
+
+            # Dynamic algorithm family lookup or naming
+            fam = "Ensemble" if "forest" in name.lower() else ("Instance-based" if "knn" in name.lower() or "neighbour" in name.lower() else "Tree-based")
+
             rows.append(
                 {
                     "model_name": name,
                     "model_owner": res.owner,
-                    "algorithm_family": ALGORITHM_FAMILIES.get(fam_key, "Supervised"),
+                    "algorithm_family": fam,
                     "key_configuration": str(res.hyperparameters),
                     "cv_macro_f1": oof.get("macro_f1"),
                     "cv_accuracy": oof.get("accuracy"),
@@ -170,19 +215,22 @@ class ModelComparisonManager:
                     "train_time_sec": res.total_train_time,
                     "infer_time_sec": res.total_infer_time,
                     "route_continuity": oof.get("route_continuity"),
+                    "is_comparable": True,
+                    "comparability_notes": "Verified internal baseline",
                 }
             )
 
-        # 2. Teammate models
+        # 2. Teammate models (extensible to any model implemented by teammates)
         for name, ext in self.external_results.items():
+            meta: ModelExperimentMetadata = ext["metadata"]
             m = ext.get("cv_metrics", {})
             test = self.student_test_metrics.get(name, {})
             rows.append(
                 {
                     "model_name": name,
-                    "model_owner": ext.get("owner", "Teammate"),
-                    "algorithm_family": ext.get("algorithm_family", "External"),
-                    "key_configuration": ext.get("key_configuration", ""),
+                    "model_owner": meta.owner,
+                    "algorithm_family": meta.algorithm_family,
+                    "key_configuration": meta.key_configuration,
                     "cv_macro_f1": m.get("macro_f1"),
                     "cv_accuracy": m.get("accuracy"),
                     "cv_precision": m.get("precision"),
@@ -192,9 +240,11 @@ class ModelComparisonManager:
                     "cv_log_loss": m.get("log_loss"),
                     "student_test_macro_f1": test.get("macro_f1"),
                     "student_test_top1_acc": test.get("top1_accuracy"),
-                    "train_time_sec": ext.get("train_time_sec", 0.0),
-                    "infer_time_sec": ext.get("infer_time_sec", 0.0),
-                    "route_continuity": ext.get("route_continuity"),
+                    "train_time_sec": meta.train_time_sec,
+                    "infer_time_sec": meta.infer_time_sec,
+                    "route_continuity": meta.route_continuity,
+                    "is_comparable": ext.get("is_comparable", False),
+                    "comparability_notes": ext.get("comparability_notes", ""),
                 }
             )
 

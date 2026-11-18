@@ -7,7 +7,7 @@ comparison.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold
@@ -18,16 +18,27 @@ from src.models.evaluate import Timer, evaluate_model_predictions
 
 
 def get_positive_class_index(pipeline: Pipeline, pos_label: int = 1) -> int:
-    """Safely find the column index for the target positive class in predict_proba.
+    """Find the exact column index for the target positive class in predict_proba.
 
-    Verifies the classifier's `classes_` attribute rather than assuming index 1.
+    Raises:
+        AttributeError: If classifier does not have 'classes_' attribute.
+        ValueError: If pos_label is not found in classifier's 'classes_'.
     """
     classifier = pipeline.named_steps["classifier"]
-    if hasattr(classifier, "classes_"):
-        classes = list(classifier.classes_)
-        if pos_label in classes:
-            return classes.index(pos_label)
-    return 1
+    if not hasattr(classifier, "classes_"):
+        raise AttributeError(
+            f"Classifier '{classifier.__class__.__name__}' has no 'classes_' attribute. "
+            "Estimator must be fitted before determining positive class index."
+        )
+
+    classes = list(classifier.classes_)
+    if pos_label not in classes:
+        raise ValueError(
+            f"Requested positive class '{pos_label}' was not found in classifier classes {classes}. "
+            f"Cannot safely extract positive-class probabilities."
+        )
+
+    return classes.index(pos_label)
 
 
 @dataclass
@@ -54,6 +65,7 @@ def run_trip_group_cv(
     config: Optional[FeatureConfig] = None,
     n_splits: int = 5,
     custom_params: Optional[Dict[str, Any]] = None,
+    all_observations: Optional[Union[int, pd.DataFrame]] = None,
 ) -> ModelCVResult:
     """Execute trip-grouped cross-validation for any scikit-learn compatible pipeline.
 
@@ -65,6 +77,7 @@ def run_trip_group_cv(
         config: Feature configuration object.
         n_splits: Number of GroupKFold splits (default: 5).
         custom_params: Hyperparameter overrides.
+        all_observations: Optional complete observation inventory for coverage denominator.
 
     Returns:
         ModelCVResult with out-of-fold metrics, fold records, and OOF predictions.
@@ -116,19 +129,19 @@ def run_trip_group_cv(
         fold_train_time = t_train.elapsed
         total_train_time += fold_train_time
 
-        # Predict on validation fold
+        # Inference timing: MEASURES BOTH PREDICTION AND PROBABILITY SCORING
         with Timer() as t_infer:
             y_pred = pipeline.predict(X_val)
+            classifier = pipeline.named_steps["classifier"]
+            if hasattr(classifier, "predict_proba"):
+                probs = pipeline.predict_proba(X_val)
+                pos_idx = get_positive_class_index(pipeline, pos_label=1)
+                y_prob = probs[:, pos_idx]
+            else:
+                y_prob = y_pred.astype(float)
+
         fold_infer_time = t_infer.elapsed
         total_infer_time += fold_infer_time
-
-        # Probability scoring
-        if hasattr(pipeline.named_steps["classifier"], "predict_proba"):
-            probs = pipeline.predict_proba(X_val)
-            pos_idx = get_positive_class_index(pipeline, pos_label=1)
-            y_prob = probs[:, pos_idx]
-        else:
-            y_prob = y_pred.astype(float)
 
         val_df = df_train.iloc[val_idx].copy()
         val_df["pred_matching"] = y_pred
@@ -143,6 +156,7 @@ def run_trip_group_cv(
             label_col=config.label_column,
             trip_col="trip_id",
             obs_col="observation_id",
+            all_observations=all_observations,
         )
         f_eval["fold"] = fold_idx
         f_eval["train_time"] = fold_train_time
@@ -162,6 +176,7 @@ def run_trip_group_cv(
         label_col=config.label_column,
         trip_col="trip_id",
         obs_col="observation_id",
+        all_observations=all_observations,
     )
     oof_eval["total_train_time"] = total_train_time
     oof_eval["total_infer_time"] = total_infer_time
