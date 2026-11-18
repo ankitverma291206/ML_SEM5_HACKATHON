@@ -1,0 +1,22 @@
+services:
+  pathsnap-api:
+    build: .
+    container_name: pathsnap-api
+    ports:
+      - "${PATHSNAP_PORT:-8000}:8000"
+    environment:
+      PATHSNAP_TRIPS_DIR: ${PATHSNAP_TRIPS_DIR:-/app/Student folder/student_test}
+      PATHSNAP_PARTITION: ${PATHSNAP_PARTITION:-student_test}
+      PATHSNAP_CORS_ORIGINS: ${PATHSNAP_CORS_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000}
+    volumes:
+      - type: bind
+        source: ./Student folder
+        target: /app/Student folder
+        read_only: true
+      - type: bind
+        source: ./data
+        target: /app/data
+        read_only: true
+        bind:
+          create_host_path: true
+    restart: unless-stopped
