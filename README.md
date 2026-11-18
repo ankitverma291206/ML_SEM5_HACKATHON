@@ -68,9 +68,25 @@ The readable, heavily commented training script is `src/models/train_xgboost.py`
 2. Checks that trip IDs, candidate labels, and alignment files agree.
 3. Uses only geometric/movement features. It excludes trip/arc identifiers and reference labels from model inputs.
 4. Encodes bearings with sine and cosine so directions around 0°/360° are treated as neighbors. XGBoost handles missing feature values.
-5. Measures candidate Macro F1 and Log Loss, observation-level Top-1 accuracy, and candidate miss rate.
+5. Measures candidate Macro F1, precision, recall, and Log Loss; observation-level Top-1 accuracy; route continuity; candidate miss rate; inference time; route-level arc overlap; and GPS-to-road distance.
 6. Uses `GroupKFold` by trip. A trip is kept entirely in either training or validation for each fold.
 7. Fits one final model on the processed training trips and saves the model plus metadata.
+
+Every requested metric is included in the cross-validation output:
+
+| Metric | How this report calculates it |
+| --- | --- |
+| Macro F1 | Candidate-level F1 averaged across the matching/non-matching classes, using a 0.5 probability threshold |
+| Top-1 accuracy | Correct highest-scoring candidate divided by all aligned GPS observations; candidate misses count as incorrect |
+| Log Loss | Candidate-level probability log loss |
+| Route continuity | Share of consecutive predicted-observation pairs that stay on the same directed arc or connect at directed endpoints; pairs with a missing prediction are excluded and their count is visible in the report |
+| Candidate miss rate | Share of aligned observations where candidate generation supplied no correct arc |
+| Inference time | Mean milliseconds per held-out trip for model scoring and selecting the top candidate; excludes data loading and feature generation |
+| Precision and Recall | Candidate-level scores for the positive (matching arc) class at a 0.5 probability threshold |
+| Route-level accuracy | Mean per-trip Jaccard overlap between the unique predicted and reference arc sets; this does not account for route order |
+| GPS-to-road distance | Mean and 95th-percentile distance in metres from GPS points to their selected candidate arcs; only observations with a selected candidate contribute |
+
+The outputs include both `top1_accuracy_when_candidate_exists` and stricter `end_to_end_top1_accuracy`. They also report pooled route continuity, mean trip-level continuity, and route-transition coverage so missing predictions are visible. All requested metrics are printed as a readable mean ± standard-deviation table and saved to `experiments/xgboost_metrics_summary.csv`; fold-level details are saved in `experiments/xgboost_group_cv.csv`.
 
 Run from the repository root:
 
