@@ -1,0 +1,51 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+credentials.json
+secrets.json
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# Raw datasets, archives, and temporary downloads
+data/
+*.zip
+*.tar.gz
+*.rar
+*.7z
+Student folder/
+student_test/
+train/
+evaluator_test/
+
+# Preserved project directories (never ignore tracking files)
+!artifacts/
+!experiments/
+!notebooks/
