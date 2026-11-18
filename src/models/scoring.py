@@ -18,6 +18,7 @@ from src.models.evaluate import Timer
 from src.models.validation import get_positive_class_index
 
 
+# Simple explanation: Score candidate road segments and return positive-class probabilities.
 def score_candidates(
     pipeline: Pipeline,
     df_candidates: pd.DataFrame,
@@ -68,6 +69,7 @@ def score_candidates(
     return result_df
 
 
+# Simple explanation: Save model pipeline and configuration for deployment.
 def save_model_artifacts(
     pipeline: Pipeline,
     config: FeatureConfig,
@@ -96,6 +98,7 @@ def save_model_artifacts(
     }
 
 
+# Simple explanation: Load serialized model and configuration for inference.
 def load_model_artifacts(
     artifacts_dir: Union[str, Path] = "artifacts",
     model_filename: str = "best_model.pkl",

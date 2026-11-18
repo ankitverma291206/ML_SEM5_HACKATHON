@@ -41,6 +41,7 @@ FORBIDDEN_REFERENCE_COLUMNS: Set[str] = {
 }
 
 
+# Simple explanation: Encode circular quantities (headings/bearings) into sine and cosine components.
 def encode_circular_angles(
     angles: Union[np.ndarray, pd.Series, List[float]],
     period: float = 360.0,
@@ -64,6 +65,7 @@ def encode_circular_angles(
 
 
 @dataclass
+# Simple explanation: Manages feature definitions and dataset validation for candidate models.
 class FeatureConfig:
     """Manages feature definitions and dataset validation for candidate models.
 
@@ -78,6 +80,7 @@ class FeatureConfig:
     impute_missing: bool = True
     random_seed: int = 42
 
+    # Simple explanation: Validate configuration integrity against accidental leakage hazards.
     def __post_init__(self) -> None:
         """Validate configuration integrity against accidental leakage hazards."""
         # 1. Reject identifiers inside predictive feature list
@@ -103,6 +106,7 @@ class FeatureConfig:
                 f"cannot appear inside predictive 'feature_columns'."
             )
 
+    # Simple explanation: Serialize configuration to dictionary.
     def to_dict(self) -> Dict:
         """Serialize configuration to dictionary."""
         return {
@@ -114,6 +118,7 @@ class FeatureConfig:
             "random_seed": self.random_seed,
         }
 
+    # Simple explanation: Save configuration to JSON file.
     def save_json(self, path: Union[str, Path]) -> None:
         """Save configuration to JSON file."""
         path = Path(path)
@@ -122,12 +127,14 @@ class FeatureConfig:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
+    # Simple explanation: Load configuration from JSON file.
     def from_json(cls, path: Union[str, Path]) -> "FeatureConfig":
         """Load configuration from JSON file."""
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return cls(**data)
 
+    # Simple explanation: Validate that a DataFrame adheres strictly to required schemas and types.
     def validate_dataframe(
         self, df: pd.DataFrame, require_label: bool = False
     ) -> None:

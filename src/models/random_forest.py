@@ -36,6 +36,7 @@ DEFAULT_RF_PARAMS: Dict[str, Any] = {
 }
 
 
+# Simple explanation: Prepare data and build the Random Forest model.
 def build_random_forest_pipeline(
     config: Optional[FeatureConfig] = None,
     custom_params: Optional[Dict[str, Any]] = None,
@@ -60,6 +61,7 @@ def build_random_forest_pipeline(
     return Pipeline(steps)
 
 
+# Simple explanation: Check the Random Forest using trips held out from training.
 def evaluate_random_forest(
     df_train: pd.DataFrame,
     config: Optional[FeatureConfig] = None,
@@ -98,6 +100,7 @@ def evaluate_random_forest(
     return result
 
 
+# Simple explanation: Train the Random Forest on the available training data and save it.
 def fit_and_save_random_forest(
     df_train: pd.DataFrame,
     config: Optional[FeatureConfig] = None,

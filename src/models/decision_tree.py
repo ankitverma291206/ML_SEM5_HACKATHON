@@ -33,6 +33,7 @@ DEFAULT_DT_PARAMS: Dict[str, Any] = {
 }
 
 
+# Simple explanation: Prepare data and build the Decision Tree model.
 def build_decision_tree_pipeline(
     config: Optional[FeatureConfig] = None,
     custom_params: Optional[Dict[str, Any]] = None,
@@ -57,6 +58,7 @@ def build_decision_tree_pipeline(
     return Pipeline(steps)
 
 
+# Simple explanation: Check the Decision Tree using trips held out from training.
 def evaluate_decision_tree(
     df_train: pd.DataFrame,
     config: Optional[FeatureConfig] = None,
@@ -94,6 +96,7 @@ def evaluate_decision_tree(
     return result
 
 
+# Simple explanation: Train the Decision Tree on the available training data and save it.
 def fit_and_save_decision_tree(
     df_train: pd.DataFrame,
     config: Optional[FeatureConfig] = None,

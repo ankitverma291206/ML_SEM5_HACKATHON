@@ -43,6 +43,7 @@ from src.models.evaluate import (
 from src.models.viterbi import ViterbiRouteDecoder, compute_route_continuity
 
 
+# Simple explanation: Calculate normalized sequence similarity percentage based on Levenshtein distance.
 def levenshtein_similarity(seq1: List[int], seq2: List[int]) -> float:
     """Calculate normalized sequence similarity percentage based on Levenshtein distance."""
     if not seq1 and not seq2:
@@ -75,6 +76,7 @@ def levenshtein_similarity(seq1: List[int], seq2: List[int]) -> float:
     return float((1.0 - (edit_dist / max_len)) * 100.0)
 
 
+# Simple explanation: Collapse adjacent identical elements while preserving order (run-length deduplication).
 def collapse_consecutive(seq: List[int]) -> List[int]:
     """Collapse adjacent identical elements while preserving order (run-length deduplication)."""
     res: List[int] = []
@@ -86,6 +88,7 @@ def collapse_consecutive(seq: List[int]) -> List[int]:
     return res
 
 
+# Simple explanation: Calculate geographical distance in metres from each GPS point to its predicted road LineString.
 def compute_gps_to_road_distances(
     data: Dict[str, pd.DataFrame],
     predicted_arcs: List[int],
@@ -125,6 +128,7 @@ def compute_gps_to_road_distances(
     return dists
 
 
+# Simple explanation: Handle run complete evaluation.
 def run_complete_evaluation():
     print("=" * 75)
     print("PATHSNAP COMPLETE EVALUATION WORKSTREAM (Atharv Kulkarni - PES2UG24CS092)")
@@ -537,6 +541,7 @@ def run_complete_evaluation():
     build_markdown_report(df_comp, df_bench, df_dist, exp_dir)
 
 
+# Simple explanation: Generate extensive atharv_complete_model_report.md.
 def build_markdown_report(
     df_comp: pd.DataFrame,
     df_bench: pd.DataFrame,

@@ -34,6 +34,7 @@ DEFAULT_KNN_PARAMS: Dict[str, Any] = {
 }
 
 
+# Simple explanation: Fill missing values, scale the data, and build the KNN model.
 def build_knn_pipeline(
     config: Optional[FeatureConfig] = None,
     custom_params: Optional[Dict[str, Any]] = None,
@@ -58,6 +59,7 @@ def build_knn_pipeline(
     return Pipeline(steps)
 
 
+# Simple explanation: Check KNN using trips held out from training.
 def evaluate_knn(
     df_train: pd.DataFrame,
     config: Optional[FeatureConfig] = None,
@@ -95,6 +97,7 @@ def evaluate_knn(
     return result
 
 
+# Simple explanation: Train KNN on the available training data and save it.
 def fit_and_save_knn(
     df_train: pd.DataFrame,
     config: Optional[FeatureConfig] = None,

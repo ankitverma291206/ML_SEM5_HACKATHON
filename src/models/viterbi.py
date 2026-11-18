@@ -18,6 +18,7 @@ import pandas as pd
 import networkx as nx
 
 
+# Simple explanation: Count how often neighboring predicted roads connect.
 def compute_route_continuity(
     predicted_arcs: List[int],
     arcs_df: pd.DataFrame,
@@ -68,9 +69,11 @@ def compute_route_continuity(
     return total, valid, rate
 
 
+# Simple explanation: Log-domain Viterbi decoder for sequential map-matching.
 class ViterbiRouteDecoder:
     """Log-domain Viterbi decoder for sequential map-matching."""
 
+    # Simple explanation: Set the starting values for this object.
     def __init__(
         self,
         same_arc_log_prob: float = 0.0,
@@ -87,6 +90,7 @@ class ViterbiRouteDecoder:
         self.min_emission_prob = min_emission_prob
         self.learned_transition_probs = learned_transition_probs or {}
 
+    # Simple explanation: Choose the most likely connected road for each point in the trip.
     def decode_trip(
         self,
         trip_candidates: pd.DataFrame,
