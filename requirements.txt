@@ -1,11 +1,26 @@
+
+# API
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
-numpy>=1.26
-pandas>=2.0
-scikit-learn>=1.5
+
+# Core data science and ML
+numpy>=1.26,<3.0
+pandas>=2.2,<4.0
+scikit-learn>=1.5,<2.0
 scipy>=1.13
+xgboost>=2.0,<4.0
+
+# Bayesian optimization
 optuna>=3.6
-pyproj>=3.6
-shapely>=2.0
+
+# Geographic processing
+pyproj>=3.6,<4.0
+shapely>=2.0,<3.0
+networkx>=3.2,<4.0
+
+# Visualization
 matplotlib>=3.8
+folium
+
+# Model persistence
 joblib>=1.4

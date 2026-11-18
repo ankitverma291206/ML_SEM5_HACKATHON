@@ -1,3 +1,4 @@
+
 # Python bytecode and caches
 __pycache__/
 *.py[cod]
@@ -57,3 +58,6 @@ evaluator_test/
 artifacts/atharv_knn.pkl
 experiments/*.parquet
 
+# Local application and generated experiment artifacts
+experiments/features/
+experiments/candidate_features_all.csv.gz

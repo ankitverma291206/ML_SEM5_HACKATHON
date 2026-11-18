@@ -1,0 +1,68 @@
+{
+  "model_type": "XGBClassifier",
+  "target": "is_matching_candidate",
+  "positive_class_meaning": "candidate matches aligned reference arc",
+  "input_files": [
+    "labelled_candidates_00000001.csv",
+    "labelled_candidates_00000002.csv",
+    "labelled_candidates_00000019.csv",
+    "labelled_candidates_00000033.csv",
+    "labelled_candidates_00000042.csv",
+    "labelled_candidates_00000069.csv"
+  ],
+  "training_trip_ids": [
+    "00000001",
+    "00000002",
+    "00000019",
+    "00000033",
+    "00000042",
+    "00000069"
+  ],
+  "base_feature_columns": [
+    "distance_m",
+    "projection_position",
+    "road_bearing",
+    "gps_heading",
+    "heading_difference",
+    "gps_speed_mps",
+    "time_delta_s",
+    "large_or_invalid_time_gap"
+  ],
+  "model_feature_columns": [
+    "distance_m",
+    "projection_position",
+    "road_bearing_sin",
+    "road_bearing_cos",
+    "gps_heading_sin",
+    "gps_heading_cos",
+    "heading_difference",
+    "gps_speed_mps",
+    "time_delta_s",
+    "large_or_invalid_time_gap"
+  ],
+  "prediction_threshold_for_binary_metrics": 0.5,
+  "number_of_group_folds": 5,
+  "model_parameters": {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3,
+    "reg_lambda": 2.0,
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+    "tree_method": "hist",
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "aligned_observations_by_trip": {
+    "00000001": 1315,
+    "00000002": 7243,
+    "00000019": 2354,
+    "00000033": 5844,
+    "00000042": 7739,
+    "00000069": 2067
+  },
+  "note": "This model was trained only on the processed training-trip files available when the script ran. It has not been evaluated on student_test or evaluator_test data."
+}
